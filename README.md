@@ -14,6 +14,8 @@ time window.
   estimated power per climb
 - Estimated power (Strava-style physics model) with optional comparison against
   measured power, and a time-vs-power CSV export
+- Optional historical wind (Open-Meteo) folded into the aerodynamic term for a
+  more accurate power estimate
 - Fastest segment finder: sliding-window search by distance or time
 - Multiple `--dist` and `--time` queries supported in a single run
 
@@ -22,7 +24,10 @@ time window.
 - C++17-compatible compiler (e.g. GCC >= 8)
 - CMake >= 3.16
 - Internet access at first configure — [pugixml](https://github.com/zeux/pugixml)
-  is fetched automatically via CMake `FetchContent`, no manual install needed
+  and [nlohmann/json](https://github.com/nlohmann/json) are fetched
+  automatically via CMake `FetchContent`, no manual install needed
+- The `curl` command-line tool on `PATH` — only needed at runtime for the
+  optional `--wind` fetch (no libcurl dev package required)
 
 ## Building
 
@@ -52,6 +57,11 @@ Power estimation (runs by default):
   --cda   A        aerodynamic drag area CdA in m^2 (default: 0.32)
   --drivetrain E   drivetrain efficiency 0..1 (default: 0.977)
   --power-csv F    write a time-vs-power CSV to file F
+
+Wind (Open-Meteo historical API; improves the aero term):
+  --wind           fetch historical wind and apply it
+  --wind-cache F   like --wind, but cache to / read from file F
+  --wind-file F    apply wind from a local JSON file F (offline)
 ```
 
 Multiple `--dist` and `--time` flags are supported and each is reported
@@ -264,10 +274,35 @@ writes a `time,elapsed_s,est_power_w[,measured_power_w]` row per track point.
 `Crr`, or real rider aerodynamics, so absolute numbers are approximate — most
 accurate on sustained climbs where gravity dominates.
 
-**Planned extension — wind:** `v_hw` is already a parameter of the core model.
-Adding wind means computing rider heading from consecutive GPS points, obtaining
-wind speed/direction (weather API or sidecar file), projecting it onto the
-heading, and passing the result in — no change to the equation itself.
+### Wind
+
+Wind is fetched from the **[Open-Meteo Historical Weather API](https://open-meteo.com/en/docs/historical-weather-api)**
+(free, no API key, ERA5 reanalysis) and folded into the aerodynamic term via the
+headwind component `v_hw`:
+
+```
+v_hw = wind_speed · cos(wind_from_direction − rider_heading)
+```
+
+The rider heading is the GPS bearing between consecutive points; the wind
+direction is Open-Meteo's meteorological "blows from" bearing. A wind from ahead
+raises estimated power, a tailwind lowers it. One hourly value is requested at
+the track centroid for the ride's date(s) and matched to each point by nearest
+hour. HTTP is performed by invoking the `curl` command-line tool.
+
+| Flag | Behaviour |
+|---|---|
+| `--wind` | fetch from Open-Meteo and apply |
+| `--wind-cache F` | fetch once, cache to `F`, reuse on later runs (offline-friendly) |
+| `--wind-file F` | apply wind from a local JSON file (Open-Meteo shape); no network |
+
+When wind is applied the estimated-power block reports the average headwind and
+the CSV gains a `headwind_ms` column.
+
+**Caveats:** ERA5 is a ~25 km / hourly reanalysis with a ~5-day delay, so wind is
+a regional hourly estimate — it captures the prevailing wind of the day, not
+gusts or local terrain effects (valleys, tree cover). For rides in the last few
+days the archive may not yet have data.
 
 ## GPX format support
 

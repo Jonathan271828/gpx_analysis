@@ -1,4 +1,5 @@
 #include "gpx_reader.h"
+#include "wind.h"
 
 #include <cstdlib>
 #include <fstream>
@@ -215,6 +216,11 @@ static void print_power_stats(const PowerStats& ps, const PowerParams& pp) {
     std::cout << "  Avg est. power : " << std::setprecision(0) << ps.avg_power_w << " W\n";
     std::cout << "  Max est. power : " << std::setprecision(0) << ps.max_power_w << " W\n";
     std::cout << "  Work done      : " << std::setprecision(0) << ps.total_kj << " kJ\n";
+    if (ps.has_wind) {
+        std::cout << "  Wind           : Open-Meteo, avg headwind "
+                  << std::setprecision(1) << ps.avg_headwind_ms << " m/s"
+                  << " (+head / -tail)\n";
+    }
     if (ps.has_measured) {
         std::cout << "  Measured avg   : " << std::setprecision(0) << ps.avg_measured_w << " W\n";
         std::cout << "  Mean abs error : " << std::setprecision(0) << ps.mean_abs_err_w << " W\n";
@@ -237,9 +243,11 @@ static bool write_power_csv(const std::string&   path,
 
     const auto& pts = track.points;
     const bool has_meas = pa.stats.has_measured;
+    const bool has_wind = pa.stats.has_wind;
 
     out << "time,elapsed_s,est_power_w";
     if (has_meas) out << ",measured_power_w";
+    if (has_wind) out << ",headwind_ms";
     out << "\n";
 
     out << std::fixed << std::setprecision(1);
@@ -249,9 +257,73 @@ static bool write_power_csv(const std::string&   path,
             out << ',';
             if (pts[i].has_power) out << pts[i].power;   // measured, may be blank
         }
+        if (has_wind) out << ',' << pa.headwind_ms[i];
         out << '\n';
     }
     return true;
+}
+
+// ---------------------------------------------------------------------------
+// Obtain wind data for a track (network fetch and/or JSON cache/file)
+// ---------------------------------------------------------------------------
+
+enum class WindMode { Off, Fetch, Cache, File };
+
+static WindData obtain_wind(WindMode mode, const std::string& path,
+                            const Track& track, std::size_t track_index,
+                            std::size_t ntracks)
+{
+    WindData wind;
+    if (mode == WindMode::Off) return wind;
+
+    const auto& pts = track.points;
+    if (pts.size() < 2 || pts.front().time.size() < 10 || pts.back().time.size() < 10) {
+        std::cerr << "Wind: track has no usable coordinates/timestamps — skipping.\n";
+        return wind;
+    }
+
+    // Request location = track centroid (ERA5's ~25 km grid makes finer pointless)
+    double lat_sum = 0.0, lon_sum = 0.0;
+    for (const auto& p : pts) { lat_sum += p.lat; lon_sum += p.lon; }
+    const double lat = lat_sum / static_cast<double>(pts.size());
+    const double lon = lon_sum / static_cast<double>(pts.size());
+    const std::string start_date = pts.front().time.substr(0, 10);
+    const std::string end_date   = pts.back().time.substr(0, 10);
+
+    // Per-track cache/file path (suffix with index when more than one track)
+    const std::string p = (!path.empty() && ntracks > 1)
+                        ? path + "." + std::to_string(track_index)
+                        : path;
+
+    std::string err;
+
+    if (mode == WindMode::File) {
+        if (!load_wind_json(p, wind, err))
+            std::cerr << "Wind: could not load " << p << " (" << err << ") — no wind applied.\n";
+        return wind;
+    }
+
+    if (mode == WindMode::Cache && load_wind_json(p, wind, err)) {
+        std::cout << "Wind: loaded from cache " << p << "\n";
+        return wind;
+    }
+
+    // Fetch from Open-Meteo (Fetch mode, or Cache miss)
+    std::cout << "Wind: fetching from Open-Meteo (" << start_date
+              << " .. " << end_date << ")...\n";
+    if (!fetch_open_meteo_wind(lat, lon, start_date, end_date, wind, err)) {
+        std::cerr << "Wind: fetch failed (" << err << ") — no wind applied.\n";
+        wind.valid = false;
+        return wind;
+    }
+    if (mode == WindMode::Cache) {
+        std::string save_err;
+        if (save_wind_json(p, wind, save_err))
+            std::cout << "Wind: cached to " << p << "\n";
+        else
+            std::cerr << "Wind: could not write cache " << p << " (" << save_err << ")\n";
+    }
+    return wind;
 }
 
 // ---------------------------------------------------------------------------
@@ -272,6 +344,10 @@ static void print_usage(const char* prog) {
               << "  --cda   A        aerodynamic drag area CdA in m^2 (default: 0.32)\n"
               << "  --drivetrain E   drivetrain efficiency 0..1 (default: 0.977)\n"
               << "  --power-csv F    write a time-vs-power CSV to file F\n"
+              << "\nWind (Open-Meteo historical API; improves the aero term):\n"
+              << "  --wind           fetch historical wind and apply it\n"
+              << "  --wind-cache F   like --wind, but cache to/read from file F\n"
+              << "  --wind-file F    apply wind from local JSON file F (offline)\n"
               << "\nMultiple --dist and --time flags are supported.\n";
 }
 
@@ -300,6 +376,9 @@ int main(int argc, char* argv[]) {
     double      mass_total = 80.0;
     std::string power_csv;
 
+    WindMode    wind_mode = WindMode::Off;
+    std::string wind_path;
+
     for (int i = 2; i < argc; ++i) {
         std::string arg = argv[i];
         if (arg == "--points" && i + 1 < argc) {
@@ -322,6 +401,12 @@ int main(int argc, char* argv[]) {
             power.drivetrain_eff = std::atof(argv[++i]);
         } else if (arg == "--power-csv" && i + 1 < argc) {
             power_csv = argv[++i];
+        } else if (arg == "--wind") {
+            wind_mode = WindMode::Fetch;
+        } else if (arg == "--wind-cache" && i + 1 < argc) {
+            wind_mode = WindMode::Cache; wind_path = argv[++i];
+        } else if (arg == "--wind-file" && i + 1 < argc) {
+            wind_mode = WindMode::File; wind_path = argv[++i];
         } else {
             std::cerr << "Unknown option: " << arg << "\n";
             print_usage(argv[0]);
@@ -356,8 +441,12 @@ int main(int argc, char* argv[]) {
         TrackStats stats = reader.compute_stats(i);
         print_stats(track, stats);
 
+        // Wind data (fetched/loaded per track), then estimated power
+        WindData wind = obtain_wind(wind_mode, wind_path, track, i, data.tracks.size());
+        const WindData* wp = wind.valid ? &wind : nullptr;
+
         // Estimated power (needed before the hills table for its power column)
-        PowerAnalysis pa = reader.estimate_power(power, i);
+        PowerAnalysis pa = reader.estimate_power(power, i, wp);
 
         // Hill table (annotated with per-climb average power)
         std::vector<Hill> hills = reader.detect_hills(i);

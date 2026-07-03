@@ -18,8 +18,10 @@ Garmin Connect exports) and computes:
   power, with a time-vs-power CSV export
 - The fastest segment over a user-defined distance or time window
 
-There is no GUI, no external runtime dependency (pugixml is fetched at build
-time by CMake), and no file output — all results go to stdout.
+There is no GUI. Build-time dependencies (pugixml, nlohmann/json) are fetched by
+CMake `FetchContent`. The only runtime dependency is the `curl` command-line
+tool, and only when the optional `--wind` fetch is used. Output is stdout plus
+optional CSV files (`--power-csv`) and a wind JSON cache (`--wind-cache`).
 
 ---
 
@@ -27,20 +29,23 @@ time by CMake), and no file output — all results go to stdout.
 
 ```
 .
-├── CMakeLists.txt       CMake build definition; fetches pugixml v1.14
+├── CMakeLists.txt       CMake build; fetches pugixml v1.14 + nlohmann/json v3.11.3
 ├── README.md            User-facing documentation (shown on GitHub)
 ├── CONTEXT.md           This file — developer/AI session context
-├── .gitignore           Excludes build/ and *.gpx
+├── .gitignore           Excludes build/, Install/, Knowledge/, test/, *.gpx
 └── src/
     ├── gpx_reader.h     All public data types + GpxReader class declaration
     ├── gpx_reader.cpp   All algorithms — parsing, statistics, hill detection,
-    │                    fastest-segment sliding window. No I/O.
-    └── main.cpp         CLI argument parsing + all formatted console output.
+    │                    fastest-segment, power model. No I/O.
+    ├── wind.{h,cpp}     Wind data source: Open-Meteo fetch (via the curl CLI) +
+    │                    JSON parse/cache. All network + JSON I/O lives here.
+    └── main.cpp         CLI argument parsing + all formatted console/file output.
                          Calls into GpxReader; never touches pugixml directly.
 ```
 
-**Design principle:** `gpx_reader.cpp` contains zero I/O. `main.cpp` contains
-zero algorithmic logic. All public types are in the header.
+**Design principle:** `gpx_reader.cpp` contains zero I/O (network + JSON I/O is
+isolated in `wind.cpp`). `main.cpp` contains zero algorithmic logic. All public
+types are in the header.
 
 ---
 
@@ -49,7 +54,8 @@ zero algorithmic logic. All public types are in the header.
 ```cmake
 cmake_minimum_required(VERSION 3.16)
 set(CMAKE_CXX_STANDARD 17)
-# pugixml v1.14 fetched automatically via FetchContent
+# pugixml v1.14 + nlohmann/json v3.11.3 fetched automatically via FetchContent.
+# No libcurl dev package needed — the wind fetch shells out to the curl CLI.
 ```
 
 ### Build commands
@@ -239,6 +245,21 @@ struct PowerAnalysis {
     PowerStats          stats;
     std::vector<double> point_power_w;  // per point; [0]=0, index i = step (i-1->i)
     std::vector<long>   t_offset_s;     // per point; seconds from first (-1 if unknown)
+    std::vector<double> headwind_ms;    // per point; headwind component (m/s)
+};
+```
+`PowerStats` also carries `has_wind` / `avg_headwind_ms`.
+
+### `WindData`
+Plain hourly wind series (produced by the `wind` module, consumed by the core).
+
+```cpp
+struct WindData {
+    std::vector<std::time_t> times;     // hourly UTC timestamps (sorted)
+    std::vector<double>      speed_ms;  // wind speed at 10 m (m/s)
+    std::vector<double>      dir_deg;   // wind FROM direction (deg, meteorological)
+    bool                     valid;
+    bool sample(std::time_t t, double& speed, double& dir) const;  // nearest hour
 };
 ```
 
@@ -260,14 +281,30 @@ public:
                                       std::size_t track_index = 0)     const;
     std::vector<Hill> detect_hills(std::size_t track_index = 0)        const;
     PowerAnalysis     estimate_power(const PowerParams& params,
-                                     std::size_t track_index = 0)      const;
+                                     std::size_t track_index = 0,
+                                     const WindData* wind = nullptr) const;
     void              attach_climb_power(std::vector<Hill>& hills,
                                          const PowerAnalysis& pa)      const;
 };
 ```
 
-`estimate_power` reuses `build_tables()` and is `const`; `attach_climb_power`
-fills each hill's `avg_power_w` from the per-point series (pure, no I/O).
+`estimate_power` reuses `build_tables()` and is `const`; when `wind` is non-null
+and valid it applies the real headwind, else `v_hw = 0` (nullptr ==
+pre-wind behaviour). `attach_climb_power` fills each hill's `avg_power_w` from
+the per-point series (pure, no I/O).
+
+### `wind` module (`src/wind.{h,cpp}`) — all network + JSON I/O
+
+```cpp
+bool fetch_open_meteo_wind(lat, lon, start_date, end_date, WindData&, err);
+bool load_wind_json(path, WindData&, err);   // Open-Meteo-shaped JSON (= cache)
+bool save_wind_json(path, const WindData&, err);
+```
+`fetch_open_meteo_wind` builds the archive-API URL and GETs it by invoking the
+`curl` CLI via `popen` (no libcurl link), then parses with `nlohmann::json`. The
+cache file uses the same Open-Meteo JSON shape, so a hand-written fixture and a
+fetched cache are interchangeable. The pure helpers `bearing_deg()` and
+`headwind_component()` live in the `gpx_reader.cpp` functional core.
 
 All methods are `const` — parsing is the only mutating operation. The
 `track_index` parameter selects which `<trk>` element to operate on (default
@@ -424,23 +461,30 @@ per-step over points that carry `<power>`.
   --cda   A        drag area CdA m^2 (default: 0.32)
   --drivetrain E   drivetrain efficiency 0..1 (default: 0.977)
   --power-csv F    write time-vs-power CSV to file F
+  --wind           fetch historical wind (Open-Meteo) and apply it
+  --wind-cache F   like --wind, but cache to / read from file F
+  --wind-file F    apply wind from local JSON file F (offline)
 ```
 
 Multiple `--dist` and `--time` flags are supported; each produces a separate
 output block. Unrecognised flags print usage and exit with `EXIT_FAILURE`.
 Power estimation runs by default (mass defaults to 80 kg); `--mass` overrides the
-total directly, otherwise `--rider` + `--bike` are summed. New I/O
-(`write_power_csv`) stays in `main.cpp`; the CSV is suffixed with the track index
+total directly, otherwise `--rider` + `--bike` are summed. Wind is off unless one
+of the `--wind*` flags is given; `obtain_wind()` (in `main.cpp`) computes the
+track centroid + date range, loads/fetches `WindData`, and warns + continues
+without wind on failure. File I/O (`write_power_csv`, wind cache) stays in
+`main.cpp` / `wind.cpp`; both CSV and cache are suffixed with the track index
 when the file has more than one track.
 
 **Output order per track:**
 1. Track point listing (`print_track_points`)
 2. Statistics block (`print_stats`)
 3. Hills table (`print_hills`) — always printed, with a per-climb power column
-4. Estimated power block (`print_power_stats`)
-5. Time-vs-power CSV if `--power-csv` given (`write_power_csv`)
-6. One fastest-segment block per `--dist` value (`print_best_segment`)
-7. One fastest-segment block per `--time` value (`print_best_segment`)
+4. Wind fetch/load if a `--wind*` flag is given (`obtain_wind`)
+5. Estimated power block (`print_power_stats`) — includes wind line if applied
+6. Time-vs-power CSV if `--power-csv` given (`write_power_csv`)
+7. One fastest-segment block per `--dist` value (`print_best_segment`)
+8. One fastest-segment block per `--time` value (`print_best_segment`)
 
 ---
 
@@ -481,7 +525,7 @@ within a track are flattened into one `points` vector.
 | Cadence | Parsed (`ns3:cad`), avg/min/max reported | Optional non-zero-only average |
 | Power (measured) | Parsed (`<power>`/`ns3:power`), avg/min/max reported | Optional non-zero-only average |
 | Power (estimated) | Physics model; avg/max/work, per-climb, CSV; compared to measured | Wind (see below); calibrate CdA/Crr per activity |
-| Wind | **Not modelled** (`v_hw = 0` in aero term) | Rider heading + weather API → project onto heading → `v_hw` |
+| Wind | Fetched from Open-Meteo, projected onto heading → `v_hw` in aero term | ERA5 fallback for recent rides; per-segment sampling; use gusts |
 | Hill thresholds | Compile-time constants | Expose `--min-grade`, `--min-gain`, `--gap-tolerance` CLI flags |
 | Gradient/speed distance | Horizontal (2D) only | True slope distance = `sqrt(horiz² + delta_ele²)` |
 | Output format | Plain text + time-vs-power CSV | Add `--json` export flag |
