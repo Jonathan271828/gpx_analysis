@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ctime>
 #include <string>
 #include <vector>
 
@@ -121,6 +122,8 @@ struct PowerStats {
     double avg_measured_w  = 0.0;
     double mean_abs_err_w  = 0.0;   // mean |estimated - measured|
     double mean_bias_w     = 0.0;   // mean (estimated - measured)
+    bool   has_wind        = false; // set if wind data was applied
+    double avg_headwind_ms = 0.0;   // mean headwind component (m/s; +head, -tail)
 };
 
 // Full result of estimate_power(): the summary plus the per-point series that
@@ -131,6 +134,23 @@ struct PowerAnalysis {
                                         // index i = est. power on step (i-1 -> i)
     std::vector<long>   t_offset_s;     // size == points.size(); seconds from the
                                         // first point (-1 if timestamp unknown)
+    std::vector<double> headwind_ms;    // size == points.size(); per-step headwind
+                                        // component (m/s), 0 if no wind applied
+};
+
+// ---------------------------------------------------------------------------
+// Wind data (plain data; produced by the wind module, consumed by the core)
+// ---------------------------------------------------------------------------
+
+struct WindData {
+    std::vector<std::time_t> times;     // hourly UTC timestamps (sorted ascending)
+    std::vector<double>      speed_ms;  // wind speed at 10 m (m/s)
+    std::vector<double>      dir_deg;   // wind FROM direction (deg, meteorological)
+    bool                     valid = false;
+
+    /// Nearest-hour lookup. Sets speed/dir and returns true, or returns false
+    /// if empty or `t` lies far outside the covered range.
+    bool sample(std::time_t t, double& speed, double& dir) const;
 };
 
 // ---------------------------------------------------------------------------
@@ -163,9 +183,11 @@ public:
     std::vector<Hill> detect_hills(std::size_t track_index = 0) const;
 
     /// Estimate power along the track using the physics model in PowerParams.
-    /// Returns a summary plus a per-point power series.
+    /// Returns a summary plus a per-point power series. When `wind` is non-null
+    /// and valid, the aerodynamic term uses the real headwind component.
     PowerAnalysis estimate_power(const PowerParams& params,
-                                 std::size_t track_index = 0) const;
+                                 std::size_t track_index = 0,
+                                 const WindData* wind = nullptr) const;
 
     /// Fill each hill's avg_power_w by averaging the per-point power series
     /// over the climb's index range. Safe to call with any hills/analysis.

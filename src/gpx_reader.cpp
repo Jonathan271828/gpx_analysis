@@ -1,6 +1,7 @@
 #include "gpx_reader.h"
 
 #include <pugixml.hpp>
+#include <algorithm>
 #include <cmath>
 #include <ctime>
 #include <sstream>
@@ -548,7 +549,7 @@ double air_density(double ele_m, double temp_c, bool has_temp, double fallback) 
 
 /// Instantaneous pedal power (W) for one step. Sum of the four resistive
 /// forces times ground speed, divided by drivetrain efficiency. `v_hw` is the
-/// headwind component (0 until wind support is added). No clamping here.
+/// headwind component (m/s; positive = headwind). No clamping here.
 double power_at_step(double v, double a, double grade, double rho,
                      const PowerParams& p, double v_hw = 0.0) {
     constexpr double G = 9.8067;           // m/s^2
@@ -558,23 +559,74 @@ double power_at_step(double v, double a, double grade, double rho,
     const double f_gravity = m * G * std::sin(theta);
     const double f_rolling = m * G * std::cos(theta) * p.crr;
     const double v_as      = v + v_hw;     // airspeed
-    // With v_hw == 0 the square is exact; for the future wind phase use
-    // std::fabs(v_as) * v_as so a strong tailwind reverses the force.
-    const double f_aero    = 0.5 * rho * p.cda * v_as * v_as;
+    // fabs(v_as)*v_as keeps the drag direction correct: a strong tailwind
+    // (v_as < 0) pushes the rider, reversing the aero force sign.
+    const double f_aero    = 0.5 * rho * p.cda * std::fabs(v_as) * v_as;
     const double f_accel   = m * a;
 
     const double force = f_gravity + f_rolling + f_aero + f_accel;
     return (force * v) / p.drivetrain_eff;
 }
 
+/// Initial great-circle bearing from point 1 to point 2, in degrees (0 = North,
+/// clockwise), range [0, 360).
+double bearing_deg(double lat1, double lon1, double lat2, double lon2) {
+    constexpr double DEG2RAD = M_PI / 180.0;
+    const double phi1 = lat1 * DEG2RAD;
+    const double phi2 = lat2 * DEG2RAD;
+    const double dlam = (lon2 - lon1) * DEG2RAD;
+    const double y = std::sin(dlam) * std::cos(phi2);
+    const double x = std::cos(phi1) * std::sin(phi2)
+                   - std::sin(phi1) * std::cos(phi2) * std::cos(dlam);
+    double brng = std::atan2(y, x) / DEG2RAD;
+    if (brng < 0.0) brng += 360.0;
+    return brng;
+}
+
+/// Headwind component (m/s) for a rider heading `heading_deg` in wind blowing
+/// FROM `wind_from_deg` at `speed`. Positive = headwind, negative = tailwind.
+double headwind_component(double heading_deg, double wind_from_deg, double speed) {
+    constexpr double DEG2RAD = M_PI / 180.0;
+    return speed * std::cos((wind_from_deg - heading_deg) * DEG2RAD);
+}
+
 } // namespace
+
+// ---------------------------------------------------------------------------
+// WindData::sample — nearest-hour lookup
+// ---------------------------------------------------------------------------
+
+bool WindData::sample(std::time_t t, double& speed, double& dir) const {
+    if (!valid || times.empty()) return false;
+
+    auto it = std::lower_bound(times.begin(), times.end(), t);
+    std::size_t idx;
+    if (it == times.begin()) {
+        idx = 0;
+    } else if (it == times.end()) {
+        idx = times.size() - 1;
+    } else {
+        const std::size_t hi = static_cast<std::size_t>(it - times.begin());
+        const std::size_t lo = hi - 1;
+        idx = (t - times[lo] <= times[hi] - t) ? lo : hi;
+    }
+
+    // Reject if the nearest sample is more than ~90 min away from t
+    const std::time_t diff = (t > times[idx]) ? (t - times[idx]) : (times[idx] - t);
+    if (diff > 5400) return false;
+
+    speed = speed_ms[idx];
+    dir   = dir_deg[idx];
+    return true;
+}
 
 // ---------------------------------------------------------------------------
 // GpxReader::estimate_power
 // ---------------------------------------------------------------------------
 
 PowerAnalysis GpxReader::estimate_power(const PowerParams& params,
-                                        std::size_t track_index) const
+                                        std::size_t track_index,
+                                        const WindData* wind) const
 {
     PowerAnalysis pa;
     if (track_index >= data_.tracks.size()) return pa;
@@ -588,6 +640,7 @@ PowerAnalysis GpxReader::estimate_power(const PowerParams& params,
     build_tables(pts, cum_dist, timestamps);
 
     pa.point_power_w.assign(n, 0.0);
+    pa.headwind_ms.assign(n, 0.0);
 
     // Elapsed seconds from the first point (for the time-vs-power CSV)
     pa.t_offset_s.assign(n, -1);
@@ -606,6 +659,9 @@ PowerAnalysis GpxReader::estimate_power(const PowerParams& params,
     double      meas_sum = 0.0, abs_err_sum = 0.0, bias_sum = 0.0;
     std::size_t meas_count = 0;
 
+    double      hw_sum = 0.0;
+    std::size_t hw_count = 0;
+
     for (std::size_t i = 1; i < n; ++i) {
         // A gap in timestamps breaks the acceleration chain
         if (timestamps[i] < 0 || timestamps[i - 1] < 0) { have_prev_v = false; continue; }
@@ -621,7 +677,22 @@ PowerAnalysis GpxReader::estimate_power(const PowerParams& params,
 
         const double rho = air_density(pts[i].ele, pts[i].atemp, pts[i].has_atemp,
                                        params.default_rho);
-        double P = power_at_step(v, a, grade, rho, params);
+
+        // Headwind component from wind data, if available for this point
+        double v_hw = 0.0;
+        if (wind && wind->valid) {
+            double ws, wd;
+            if (wind->sample(timestamps[i], ws, wd)) {
+                const double heading = bearing_deg(pts[i - 1].lat, pts[i - 1].lon,
+                                                   pts[i].lat, pts[i].lon);
+                v_hw = headwind_component(heading, wd, ws);
+                pa.headwind_ms[i] = v_hw;
+                hw_sum += v_hw;
+                ++hw_count;
+            }
+        }
+
+        double P = power_at_step(v, a, grade, rho, params, v_hw);
         if (params.clamp_negative && P < 0.0) P = 0.0;
 
         pa.point_power_w[i] = P;
@@ -650,6 +721,10 @@ PowerAnalysis GpxReader::estimate_power(const PowerParams& params,
         pa.stats.avg_measured_w = meas_sum    / static_cast<double>(meas_count);
         pa.stats.mean_abs_err_w = abs_err_sum / static_cast<double>(meas_count);
         pa.stats.mean_bias_w    = bias_sum    / static_cast<double>(meas_count);
+    }
+    if (hw_count > 0) {
+        pa.stats.has_wind        = true;
+        pa.stats.avg_headwind_ms = hw_sum / static_cast<double>(hw_count);
     }
 
     return pa;
