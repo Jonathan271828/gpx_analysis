@@ -8,7 +8,8 @@ time window.
 
 - Parse GPX 1.1 files (Garmin Connect and compatible devices)
 - Per-track statistics: distance, elevation gain/loss, duration, average speed,
-  average temperature, average climb and descent gradient
+  average temperature, heart rate, cadence and power, average climb and descent
+  gradient
 - Hill detection table: distance, elevation gain and average grade per climb
 - Fastest segment finder: sliding-window search by distance or time
 - Multiple `--dist` and `--time` queries supported in a single run
@@ -124,7 +125,8 @@ Total: 4 hills
 ### Track points listing
 
 One line per point showing index, latitude, longitude, elevation, timestamp
-and (if present) air temperature. Controlled by `--points N`.
+and (if present) air temperature, heart rate, cadence and power. Controlled by
+`--points N`.
 
 ### Statistics block
 
@@ -139,6 +141,9 @@ and (if present) air temperature. Controlled by `--points N`.
 | Duration | Time from first to last point (`HhMmSs`) |
 | Avg speed | Total distance divided by total duration in km/h |
 | Avg temperature | Mean air temperature from `ns3:atemp` extension in °C |
+| Avg heart rate | Mean / min / max heart rate from `ns3:hr` in bpm |
+| Avg cadence | Mean / min / max cadence from `ns3:cad` in rpm |
+| Avg power | Mean / min / max power from `<power>` in watts |
 | Avg climb grade | Mean gradient of all uphill steps (%) |
 | Avg desc grade | Mean gradient of all downhill steps (%, negative value) |
 
@@ -200,6 +205,9 @@ The parser reads GPX 1.1 files. The following elements are extracted:
 | `<ele>` | Elevation in metres |
 | `<time>` | ISO-8601 timestamp (UTC) |
 | `<ns3:TrackPointExtension><ns3:atemp>` | Air temperature in °C |
+| `<ns3:TrackPointExtension><ns3:hr>` | Heart rate in bpm |
+| `<ns3:TrackPointExtension><ns3:cad>` | Cadence in rpm |
+| `<power>` (or `<ns3:power>`) | Power in watts |
 | `<trk><name>` | Track name |
 | `<trk><type>` | Activity type |
 | `<metadata><time>` | Recording start time |

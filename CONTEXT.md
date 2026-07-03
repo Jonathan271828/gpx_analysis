@@ -11,7 +11,8 @@ files from scratch.
 `gpx_reader` is a C++17 command-line tool that parses GPX 1.1 files (e.g.
 Garmin Connect exports) and computes:
 
-- Overall track statistics (distance, elevation, speed, gradients, temperature)
+- Overall track statistics (distance, elevation, speed, gradients, temperature,
+  heart rate, cadence, power)
 - A table of all climbs detected on the track
 - The fastest segment over a user-defined distance or time window
 
@@ -102,6 +103,12 @@ struct TrackPoint {
     std::string time;       // ISO-8601 string, e.g. "2026-03-31T09:46:45.000Z"
     double      atemp;      // air temperature in °C (from ns3:atemp extension)
     bool        has_atemp;  // false if the extension was absent
+    int         hr;         // heart rate in bpm (from ns3:hr)
+    bool        has_hr;     // false if the field was absent
+    int         cad;        // cadence in rpm (from ns3:cad)
+    bool        has_cad;    // false if the field was absent
+    int         power;      // power in watts (from <power>)
+    bool        has_power;  // false if the field was absent
 };
 ```
 
@@ -142,6 +149,15 @@ struct TrackStats {
     double      avg_speed_kmh;      // total_distance / duration (km/h)
     double      avg_atemp;          // mean of all atemp values (°C)
     bool        has_atemp;          // false if no atemp data in track
+    double      avg_hr;             // mean heart rate (bpm); min_hr/max_hr ints
+    int         min_hr, max_hr;
+    bool        has_hr;             // false if no hr data in track
+    double      avg_cad;            // mean cadence (rpm); min_cad/max_cad ints
+    int         min_cad, max_cad;
+    bool        has_cad;            // false if no cadence data in track
+    double      avg_power;          // mean power (W); min_power/max_power ints
+    int         min_power, max_power;
+    bool        has_power;          // false if no power data in track
     double      avg_climb_pct;      // mean gradient of uphill steps (%)
     double      avg_descent_pct;    // mean gradient of downhill steps (%, negative)
 };
@@ -240,9 +256,11 @@ Uses pugixml. Key implementation details:
 - `doc.load_file()` for file I/O
 - All `<trkseg>` children of a `<trk>` are iterated and their points appended
   to the same `Track::points` vector (segments are flattened)
-- The Garmin temperature extension is accessed as `ns3:TrackPointExtension` /
-  `ns3:atemp` — pugixml treats the namespace prefix as a literal part of the
-  element name, so no special namespace handling is needed
+- The Garmin extension fields are accessed as `ns3:TrackPointExtension` /
+  `ns3:atemp`, `ns3:hr`, `ns3:cad` — pugixml treats the namespace prefix as a
+  literal part of the element name, so no special namespace handling is needed
+- Power is read from `<power>` directly under `<extensions>` (Garmin schema),
+  with a fallback to `ns3:power` inside the TrackPointExtension
 
 ---
 
@@ -347,13 +365,19 @@ The parser expects GPX 1.1 as exported by Garmin Connect. Fields extracted:
 | `<trkpt><ele>` | `TrackPoint::ele` |
 | `<trkpt><time>` | `TrackPoint::time` |
 | `<extensions><ns3:TrackPointExtension><ns3:atemp>` | `TrackPoint::atemp` |
+| `<extensions><ns3:TrackPointExtension><ns3:hr>` | `TrackPoint::hr` |
+| `<extensions><ns3:TrackPointExtension><ns3:cad>` | `TrackPoint::cad` |
+| `<extensions><power>` (or `<ns3:power>`) | `TrackPoint::power` |
 | `<trk><name>` | `Track::name` |
 | `<trk><type>` | `Track::type` |
 | `<metadata><time>` | `GpxData::metadata_time` |
 
 Missing fields degrade gracefully: missing `<ele>` → 0.0, missing `<time>` →
 empty string (timestamps return -1 and are skipped in calculations), missing
-`ns3:atemp` → `has_atemp = false`.
+`ns3:atemp` / `ns3:hr` / `ns3:cad` / `<power>` → the corresponding `has_*` flag
+stays `false`, and that sensor is omitted from both the point listing and the
+stats block. Sensor averages/min/max are computed only over points that carry
+the field (all present samples, including zeros for coasting cadence/power).
 
 Multiple `<trk>` elements are fully supported. Multiple `<trkseg>` elements
 within a track are flattened into one `points` vector.
@@ -364,9 +388,9 @@ within a track are flattened into one `points` vector.
 
 | Area | Current state | Possible extension |
 |---|---|---|
-| Heart rate | Not parsed | Add `ns3:hr` field to `TrackPoint` |
-| Cadence | Not parsed | Add `ns3:cad` field to `TrackPoint` |
-| Power | Not parsed | Add `ns3:watts` or similar |
+| Heart rate | Parsed (`ns3:hr`), avg/min/max reported | — |
+| Cadence | Parsed (`ns3:cad`), avg/min/max reported | Optional non-zero-only average |
+| Power | Parsed (`<power>`/`ns3:power`), avg/min/max reported | Optional non-zero-only average |
 | Hill thresholds | Compile-time constants | Expose `--min-grade`, `--min-gain`, `--gap-tolerance` CLI flags |
 | Gradient distance | Horizontal (2D) only | True slope distance = `sqrt(horiz² + delta_ele²)` |
 | Output format | Plain text to stdout | Add `--csv` or `--json` export flag |

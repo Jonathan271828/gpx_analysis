@@ -14,6 +14,12 @@ struct TrackPoint {
     std::string time;           // ISO-8601 string as-is from the file
     double      atemp = 0.0;   // air temperature in °C (from ns3:atemp)
     bool        has_atemp = false;
+    int         hr    = 0;     // heart rate in bpm (from ns3:hr)
+    bool        has_hr = false;
+    int         cad   = 0;     // cadence in rpm (from ns3:cad)
+    bool        has_cad = false;
+    int         power = 0;     // power in watts (from <power>)
+    bool        has_power = false;
 };
 
 struct Track {
@@ -42,6 +48,13 @@ struct TrackStats {
     double      avg_speed_kmh    = 0.0;
     double      avg_atemp        = 0.0;  // average air temperature
     bool        has_atemp        = false;
+    // Sensor statistics (averaged over all points that carry the field)
+    double      avg_hr           = 0.0;  int min_hr    = 0;  int max_hr    = 0;
+    bool        has_hr           = false;
+    double      avg_cad          = 0.0;  int min_cad   = 0;  int max_cad   = 0;
+    bool        has_cad          = false;
+    double      avg_power        = 0.0;  int min_power = 0;  int max_power = 0;
+    bool        has_power        = false;
     // Gradient statistics (only steps with horiz. distance >= 1 m are counted)
     double      avg_climb_pct    = 0.0;  // mean gradient of uphill steps (%)
     double      avg_descent_pct  = 0.0;  // mean gradient of downhill steps (%, negative)

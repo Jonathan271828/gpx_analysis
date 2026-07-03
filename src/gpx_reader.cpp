@@ -86,7 +86,7 @@ bool GpxReader::parse(const std::string& filepath) {
                 pt.ele = trkpt.child("ele").text().as_double();
                 pt.time = trkpt.child("time").child_value();
 
-                // Extensions: look for ns3:atemp
+                // Extensions: look for the Garmin TrackPointExtension fields
                 pugi::xml_node ext = trkpt.child("extensions");
                 if (ext) {
                     // The namespace prefix is part of the element name in pugixml
@@ -97,6 +97,26 @@ bool GpxReader::parse(const std::string& filepath) {
                             pt.atemp = atemp_node.text().as_double();
                             pt.has_atemp = true;
                         }
+                        pugi::xml_node hr_node = tpe.child("ns3:hr");
+                        if (hr_node) {
+                            pt.hr = hr_node.text().as_int();
+                            pt.has_hr = true;
+                        }
+                        pugi::xml_node cad_node = tpe.child("ns3:cad");
+                        if (cad_node) {
+                            pt.cad = cad_node.text().as_int();
+                            pt.has_cad = true;
+                        }
+                    }
+
+                    // Power lives directly under <extensions> as <power> in the
+                    // Garmin schema; some exporters emit <ns3:power> inside the
+                    // TrackPointExtension instead — accept both.
+                    pugi::xml_node pw = ext.child("power");
+                    if (!pw && tpe) pw = tpe.child("ns3:power");
+                    if (pw) {
+                        pt.power = pw.text().as_int();
+                        pt.has_power = true;
                     }
                 }
 
@@ -131,6 +151,13 @@ TrackStats GpxReader::compute_stats(std::size_t track_index) const {
     double atemp_sum   = 0.0;
     std::size_t atemp_count = 0;
 
+    long        hr_sum    = 0;  int hr_min    = 0;  int hr_max    = 0;
+    std::size_t hr_count  = 0;
+    long        cad_sum   = 0;  int cad_min   = 0;  int cad_max   = 0;
+    std::size_t cad_count = 0;
+    long        power_sum = 0;  int power_min = 0;  int power_max = 0;
+    std::size_t power_count = 0;
+
     double climb_grade_sum  = 0.0;
     double descent_grade_sum = 0.0;
     std::size_t climb_count  = 0;
@@ -147,6 +174,26 @@ TrackStats GpxReader::compute_stats(std::size_t track_index) const {
         if (p.has_atemp) {
             atemp_sum += p.atemp;
             ++atemp_count;
+        }
+
+        // Sensors: accumulate sum and running min/max (seed on first sample)
+        if (p.has_hr) {
+            if (hr_count == 0) { hr_min = hr_max = p.hr; }
+            else { if (p.hr < hr_min) hr_min = p.hr; if (p.hr > hr_max) hr_max = p.hr; }
+            hr_sum += p.hr;
+            ++hr_count;
+        }
+        if (p.has_cad) {
+            if (cad_count == 0) { cad_min = cad_max = p.cad; }
+            else { if (p.cad < cad_min) cad_min = p.cad; if (p.cad > cad_max) cad_max = p.cad; }
+            cad_sum += p.cad;
+            ++cad_count;
+        }
+        if (p.has_power) {
+            if (power_count == 0) { power_min = power_max = p.power; }
+            else { if (p.power < power_min) power_min = p.power; if (p.power > power_max) power_max = p.power; }
+            power_sum += p.power;
+            ++power_count;
         }
 
         if (i > 0) {
@@ -192,6 +239,26 @@ TrackStats GpxReader::compute_stats(std::size_t track_index) const {
     if (atemp_count > 0) {
         stats.avg_atemp = atemp_sum / static_cast<double>(atemp_count);
         stats.has_atemp = true;
+    }
+
+    // Sensor averages / extremes
+    if (hr_count > 0) {
+        stats.avg_hr = static_cast<double>(hr_sum) / static_cast<double>(hr_count);
+        stats.min_hr = hr_min;
+        stats.max_hr = hr_max;
+        stats.has_hr = true;
+    }
+    if (cad_count > 0) {
+        stats.avg_cad = static_cast<double>(cad_sum) / static_cast<double>(cad_count);
+        stats.min_cad = cad_min;
+        stats.max_cad = cad_max;
+        stats.has_cad = true;
+    }
+    if (power_count > 0) {
+        stats.avg_power = static_cast<double>(power_sum) / static_cast<double>(power_count);
+        stats.min_power = power_min;
+        stats.max_power = power_max;
+        stats.has_power = true;
     }
 
     // Average climb / descent gradient

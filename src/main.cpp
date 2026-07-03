@@ -46,6 +46,9 @@ static void print_track_points(const Track& track, std::size_t max_print) {
         if (p.has_atemp) {
             std::cout << "  temp=" << std::setprecision(1) << p.atemp << " C";
         }
+        if (p.has_hr)    std::cout << "  hr=" << p.hr << " bpm";
+        if (p.has_cad)   std::cout << "  cad=" << p.cad << " rpm";
+        if (p.has_power) std::cout << "  pw=" << p.power << " W";
         std::cout << "\n";
     }
 
@@ -82,6 +85,21 @@ static void print_stats(const Track& track, const TrackStats& s) {
     if (s.has_atemp) {
         std::cout << "  Avg temperature: " << std::setprecision(1)
                   << s.avg_atemp << " C\n";
+    }
+    if (s.has_hr) {
+        std::cout << "  Avg heart rate : " << std::setprecision(0)
+                  << s.avg_hr << " bpm (min " << s.min_hr
+                  << ", max " << s.max_hr << ")\n";
+    }
+    if (s.has_cad) {
+        std::cout << "  Avg cadence    : " << std::setprecision(0)
+                  << s.avg_cad << " rpm (min " << s.min_cad
+                  << ", max " << s.max_cad << ")\n";
+    }
+    if (s.has_power) {
+        std::cout << "  Avg power      : " << std::setprecision(0)
+                  << s.avg_power << " W (min " << s.min_power
+                  << ", max " << s.max_power << ")\n";
     }
     std::cout << "  Avg climb grade: +" << std::setprecision(1)
               << s.avg_climb_pct << " %\n";
