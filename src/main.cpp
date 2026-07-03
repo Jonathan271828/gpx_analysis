@@ -1,6 +1,7 @@
 #include "gpx_reader.h"
 
 #include <cstdlib>
+#include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <sstream>
@@ -128,12 +129,14 @@ static void print_hills(const std::vector<Hill>& hills) {
               << "  " << std::setw(11) << "Avg grade"
               << "  " << std::setw(10) << "Start ele"
               << "  " << std::setw(10) << "End ele"
+              << "  " << std::setw(10) << "Avg power"
               << "  " << "Start time"
               << "\n";
     std::cout << " " << std::string(3,  '-')
               << "  " << std::string(10, '-')
               << "  " << std::string(8,  '-')
               << "  " << std::string(11, '-')
+              << "  " << std::string(10, '-')
               << "  " << std::string(10, '-')
               << "  " << std::string(10, '-')
               << "  " << std::string(24, '-')
@@ -151,8 +154,13 @@ static void print_hills(const std::vector<Hill>& hills) {
                   << "  " << std::setprecision(1) << std::setw(8)
                   << h.start_ele_m << " m"
                   << "  " << std::setprecision(1) << std::setw(8)
-                  << h.end_ele_m << " m"
-                  << "  " << h.start_time
+                  << h.end_ele_m << " m";
+        if (h.has_power)
+            std::cout << "  " << std::setprecision(0) << std::setw(8)
+                      << h.avg_power_w << " W";
+        else
+            std::cout << "  " << std::setw(8) << "-" << "  ";
+        std::cout << "  " << h.start_time
                   << "\n";
     }
 
@@ -189,15 +197,81 @@ static void print_best_segment(const BestSegment&  seg,
 }
 
 // ---------------------------------------------------------------------------
+// Print estimated power summary
+// ---------------------------------------------------------------------------
+
+static void print_power_stats(const PowerStats& ps, const PowerParams& pp) {
+    std::cout << "\n=== Estimated power ===\n";
+    if (!ps.valid) {
+        std::cout << "  (insufficient data to estimate power)\n\n";
+        return;
+    }
+    std::cout << std::fixed;
+    std::cout << "  Model          : mass " << std::setprecision(1) << pp.total_mass_kg
+              << " kg, Crr " << std::setprecision(4) << pp.crr
+              << ", CdA " << std::setprecision(3) << pp.cda << " m^2"
+              << ", drivetrain " << std::setprecision(1) << (pp.drivetrain_eff * 100.0)
+              << " %\n";
+    std::cout << "  Avg est. power : " << std::setprecision(0) << ps.avg_power_w << " W\n";
+    std::cout << "  Max est. power : " << std::setprecision(0) << ps.max_power_w << " W\n";
+    std::cout << "  Work done      : " << std::setprecision(0) << ps.total_kj << " kJ\n";
+    if (ps.has_measured) {
+        std::cout << "  Measured avg   : " << std::setprecision(0) << ps.avg_measured_w << " W\n";
+        std::cout << "  Mean abs error : " << std::setprecision(0) << ps.mean_abs_err_w << " W\n";
+        std::cout << "  Mean bias      : " << std::setprecision(1) << ps.mean_bias_w
+                  << " W (est - measured)\n";
+    }
+    std::cout << "\n";
+}
+
+// ---------------------------------------------------------------------------
+// Write time-vs-power CSV
+// ---------------------------------------------------------------------------
+
+static bool write_power_csv(const std::string&   path,
+                            const Track&          track,
+                            const PowerAnalysis&  pa)
+{
+    std::ofstream out(path);
+    if (!out) return false;
+
+    const auto& pts = track.points;
+    const bool has_meas = pa.stats.has_measured;
+
+    out << "time,elapsed_s,est_power_w";
+    if (has_meas) out << ",measured_power_w";
+    out << "\n";
+
+    out << std::fixed << std::setprecision(1);
+    for (std::size_t i = 0; i < pts.size(); ++i) {
+        out << pts[i].time << ',' << pa.t_offset_s[i] << ',' << pa.point_power_w[i];
+        if (has_meas) {
+            out << ',';
+            if (pts[i].has_power) out << pts[i].power;   // measured, may be blank
+        }
+        out << '\n';
+    }
+    return true;
+}
+
+// ---------------------------------------------------------------------------
 // Usage
 // ---------------------------------------------------------------------------
 
 static void print_usage(const char* prog) {
     std::cerr << "Usage: " << prog << " <file.gpx> [options]\n\n"
               << "Options:\n"
-              << "  --points N   print first N track points (default: 10)\n"
-              << "  --dist  D    find fastest segment of D km  (e.g. --dist 5.0)\n"
-              << "  --time  T    find fastest segment of T seconds (e.g. --time 300)\n"
+              << "  --points N       print first N track points (default: 10)\n"
+              << "  --dist  D        find fastest segment of D km  (e.g. --dist 5.0)\n"
+              << "  --time  T        find fastest segment of T seconds (e.g. --time 300)\n"
+              << "\nPower estimation (Strava-style physics model, runs by default):\n"
+              << "  --mass  M        total rider+bike mass in kg (default: 80)\n"
+              << "  --rider R        rider mass in kg (summed with --bike if --mass unset)\n"
+              << "  --bike  B        bike mass in kg (summed with --rider if --mass unset)\n"
+              << "  --crr   C        rolling resistance coefficient (default: 0.005)\n"
+              << "  --cda   A        aerodynamic drag area CdA in m^2 (default: 0.32)\n"
+              << "  --drivetrain E   drivetrain efficiency 0..1 (default: 0.977)\n"
+              << "  --power-csv F    write a time-vs-power CSV to file F\n"
               << "\nMultiple --dist and --time flags are supported.\n";
 }
 
@@ -218,6 +292,14 @@ int main(int argc, char* argv[]) {
     std::vector<double>  dist_windows;   // km
     std::vector<long>    time_windows;   // seconds
 
+    // Power estimation parameters (mass is optional; default rider+bike = 80 kg)
+    PowerParams power;
+    double      rider_kg  = 71.0;
+    double      bike_kg   = 9.0;
+    bool        mass_set  = false;
+    double      mass_total = 80.0;
+    std::string power_csv;
+
     for (int i = 2; i < argc; ++i) {
         std::string arg = argv[i];
         if (arg == "--points" && i + 1 < argc) {
@@ -226,12 +308,29 @@ int main(int argc, char* argv[]) {
             dist_windows.push_back(std::atof(argv[++i]));
         } else if (arg == "--time" && i + 1 < argc) {
             time_windows.push_back(static_cast<long>(std::atol(argv[++i])));
+        } else if (arg == "--mass" && i + 1 < argc) {
+            mass_total = std::atof(argv[++i]); mass_set = true;
+        } else if (arg == "--rider" && i + 1 < argc) {
+            rider_kg = std::atof(argv[++i]);
+        } else if (arg == "--bike" && i + 1 < argc) {
+            bike_kg = std::atof(argv[++i]);
+        } else if (arg == "--crr" && i + 1 < argc) {
+            power.crr = std::atof(argv[++i]);
+        } else if (arg == "--cda" && i + 1 < argc) {
+            power.cda = std::atof(argv[++i]);
+        } else if (arg == "--drivetrain" && i + 1 < argc) {
+            power.drivetrain_eff = std::atof(argv[++i]);
+        } else if (arg == "--power-csv" && i + 1 < argc) {
+            power_csv = argv[++i];
         } else {
             std::cerr << "Unknown option: " << arg << "\n";
             print_usage(argv[0]);
             return EXIT_FAILURE;
         }
     }
+
+    // --mass sets the total directly; otherwise sum rider + bike (default 80 kg)
+    power.total_mass_kg = mass_set ? mass_total : (rider_kg + bike_kg);
 
     // Parse GPX
     GpxReader reader;
@@ -257,9 +356,27 @@ int main(int argc, char* argv[]) {
         TrackStats stats = reader.compute_stats(i);
         print_stats(track, stats);
 
-        // Hill table
+        // Estimated power (needed before the hills table for its power column)
+        PowerAnalysis pa = reader.estimate_power(power, i);
+
+        // Hill table (annotated with per-climb average power)
         std::vector<Hill> hills = reader.detect_hills(i);
+        reader.attach_climb_power(hills, pa);
         print_hills(hills);
+
+        // Estimated power summary
+        print_power_stats(pa.stats, power);
+
+        // Optional time-vs-power CSV (suffix with track index when >1 track)
+        if (!power_csv.empty()) {
+            std::string out_path = (data.tracks.size() > 1)
+                                 ? power_csv + "." + std::to_string(i)
+                                 : power_csv;
+            if (write_power_csv(out_path, track, pa))
+                std::cout << "Wrote time-vs-power CSV: " << out_path << "\n\n";
+            else
+                std::cerr << "Error: could not write CSV to " << out_path << "\n";
+        }
 
         // Fastest distance-based segments
         for (double d_km : dist_windows) {

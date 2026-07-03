@@ -13,7 +13,9 @@ Garmin Connect exports) and computes:
 
 - Overall track statistics (distance, elevation, speed, gradients, temperature,
   heart rate, cadence, power)
-- A table of all climbs detected on the track
+- A table of all climbs detected on the track (with per-climb average power)
+- Estimated power (Strava-style physics model), optionally compared to measured
+  power, with a time-vs-power CSV export
 - The fastest segment over a user-defined distance or time window
 
 There is no GUI, no external runtime dependency (pugixml is fetched at build
@@ -177,6 +179,8 @@ struct Hill {
     double      avg_grade_pct;  // gain_m / distance_m * 100 (%)
     std::string start_time;     // ISO-8601 timestamp at start
     std::string end_time;       // ISO-8601 timestamp at peak
+    double      avg_power_w;     // mean estimated power over the climb (W)
+    bool        has_power;       // true once attach_climb_power() has run
 };
 ```
 
@@ -200,6 +204,44 @@ struct BestSegment {
 };
 ```
 
+### `PowerParams`
+Inputs to the power model. Mass is optional on the CLI (default rider+bike =
+80 kg), so estimation runs by default.
+
+```cpp
+struct PowerParams {
+    double total_mass_kg  = 80.0;   // rider + bike + kit
+    double crr            = 0.005;  // rolling resistance coefficient
+    double cda            = 0.32;   // drag area CdA (m^2)
+    double drivetrain_eff = 0.977;  // 1 - drivetrain loss
+    double default_rho    = 1.225;  // fallback air density (kg/m^3)
+    bool   clamp_negative = true;   // clamp coasting/downhill power to 0 W
+};
+```
+
+### `PowerStats` / `PowerAnalysis`
+`estimate_power()` returns a `PowerAnalysis`: a `PowerStats` summary plus the
+per-point series that feeds the hills-table power column and the CSV.
+
+```cpp
+struct PowerStats {
+    bool   valid;           // false if too little data
+    double avg_power_w;     // mean estimated power over moving samples
+    double max_power_w;
+    double total_kj;        // work done = Σ P·dt / 1000
+    bool   has_measured;    // set if the track carried <power>
+    double avg_measured_w;
+    double mean_abs_err_w;  // mean |estimated − measured|
+    double mean_bias_w;     // mean (estimated − measured)
+};
+
+struct PowerAnalysis {
+    PowerStats          stats;
+    std::vector<double> point_power_w;  // per point; [0]=0, index i = step (i-1->i)
+    std::vector<long>   t_offset_s;     // per point; seconds from first (-1 if unknown)
+};
+```
+
 ---
 
 ## GpxReader API (`src/gpx_reader.h`)
@@ -217,8 +259,15 @@ public:
     BestSegment       fastest_by_time(long window_s,
                                       std::size_t track_index = 0)     const;
     std::vector<Hill> detect_hills(std::size_t track_index = 0)        const;
+    PowerAnalysis     estimate_power(const PowerParams& params,
+                                     std::size_t track_index = 0)      const;
+    void              attach_climb_power(std::vector<Hill>& hills,
+                                         const PowerAnalysis& pa)      const;
 };
 ```
+
+`estimate_power` reuses `build_tables()` and is `const`; `attach_climb_power`
+fills each hill's `avg_power_w` from the per-point series (pure, no I/O).
 
 All methods are `const` — parsing is the only mutating operation. The
 `track_index` parameter selects which `<trk>` element to operate on (default
@@ -333,25 +382,65 @@ finishes, `commit_hill(peak_idx)` is called to flush the open hill.
 
 ---
 
+### `GpxReader::estimate_power()` — physics model
+
+Implements the Martin et al. (1998) / Strava road-cycling power model. Two pure
+helpers live in an anonymous namespace at the bottom of `gpx_reader.cpp`:
+
+- **`air_density(ele, temp, has_temp, fallback)`** — ISA barometric pressure at
+  elevation, then ideal-gas law with the actual air temperature (15 °C if the
+  point has no `atemp`). Returns ~1.225 at sea level / 15 °C.
+- **`power_at_step(v, a, grade, rho, params, v_hw=0)`** — the four-term force
+  sum `(gravity + rolling + aero + accel) × v / drivetrain_eff`. The aero term
+  uses airspeed `(v + v_hw)`; `v_hw` is 0 until wind support lands. **No
+  clamping here** — the caller clamps.
+
+`estimate_power()` reuses `build_tables()`, then per step computes ground speed
+`v = dist/dt`, `grade` (with the same 1 m noise floor as `compute_stats`),
+acceleration `a = Δv/dt`, per-point air density, and the clamped step power.
+It accumulates avg/max/energy and — when `pts[i].has_power` — the measured
+average and estimate-vs-measured error/bias. Fills `point_power_w` and
+`t_offset_s` for the CSV. `attach_climb_power()` then averages `point_power_w`
+over each hill's `(start_idx, end_idx]` range.
+
+**Averaging convention:** negative (coasting/downhill) power is clamped to 0 W
+before averaging (`PowerParams::clamp_negative`). The measured comparison is
+per-step over points that carry `<power>`.
+
+---
+
 ## CLI (`src/main.cpp`)
 
 ```
 ./build/gpx_reader <file.gpx> [options]
 
-  --points N   print first N track points  (default: 10; 0 = suppress)
-  --dist  D    fastest segment of D km     (e.g. --dist 5.0)
-  --time  T    fastest segment of T s      (e.g. --time 300)
+  --points N       print first N track points  (default: 10; 0 = suppress)
+  --dist  D        fastest segment of D km     (e.g. --dist 5.0)
+  --time  T        fastest segment of T s      (e.g. --time 300)
+  --mass  M        total rider+bike mass kg    (default: 80)
+  --rider R        rider mass kg (summed w/ --bike if --mass unset)
+  --bike  B        bike mass kg  (summed w/ --rider if --mass unset)
+  --crr   C        rolling resistance coefficient (default: 0.005)
+  --cda   A        drag area CdA m^2 (default: 0.32)
+  --drivetrain E   drivetrain efficiency 0..1 (default: 0.977)
+  --power-csv F    write time-vs-power CSV to file F
 ```
 
 Multiple `--dist` and `--time` flags are supported; each produces a separate
 output block. Unrecognised flags print usage and exit with `EXIT_FAILURE`.
+Power estimation runs by default (mass defaults to 80 kg); `--mass` overrides the
+total directly, otherwise `--rider` + `--bike` are summed. New I/O
+(`write_power_csv`) stays in `main.cpp`; the CSV is suffixed with the track index
+when the file has more than one track.
 
 **Output order per track:**
 1. Track point listing (`print_track_points`)
 2. Statistics block (`print_stats`)
-3. Hills table (`print_hills`) — always printed
-4. One fastest-segment block per `--dist` value (`print_best_segment`)
-5. One fastest-segment block per `--time` value (`print_best_segment`)
+3. Hills table (`print_hills`) — always printed, with a per-climb power column
+4. Estimated power block (`print_power_stats`)
+5. Time-vs-power CSV if `--power-csv` given (`write_power_csv`)
+6. One fastest-segment block per `--dist` value (`print_best_segment`)
+7. One fastest-segment block per `--time` value (`print_best_segment`)
 
 ---
 
@@ -390,9 +479,11 @@ within a track are flattened into one `points` vector.
 |---|---|---|
 | Heart rate | Parsed (`ns3:hr`), avg/min/max reported | — |
 | Cadence | Parsed (`ns3:cad`), avg/min/max reported | Optional non-zero-only average |
-| Power | Parsed (`<power>`/`ns3:power`), avg/min/max reported | Optional non-zero-only average |
+| Power (measured) | Parsed (`<power>`/`ns3:power`), avg/min/max reported | Optional non-zero-only average |
+| Power (estimated) | Physics model; avg/max/work, per-climb, CSV; compared to measured | Wind (see below); calibrate CdA/Crr per activity |
+| Wind | **Not modelled** (`v_hw = 0` in aero term) | Rider heading + weather API → project onto heading → `v_hw` |
 | Hill thresholds | Compile-time constants | Expose `--min-grade`, `--min-gain`, `--gap-tolerance` CLI flags |
-| Gradient distance | Horizontal (2D) only | True slope distance = `sqrt(horiz² + delta_ele²)` |
-| Output format | Plain text to stdout | Add `--csv` or `--json` export flag |
+| Gradient/speed distance | Horizontal (2D) only | True slope distance = `sqrt(horiz² + delta_ele²)` |
+| Output format | Plain text + time-vs-power CSV | Add `--json` export flag |
 | Windows support | Broken (`timegm` missing) | Replace `timegm` with `_mkgmtime` or a portable implementation |
 | Multiple files | Not supported | Accept a list of GPX files, aggregate or compare |
