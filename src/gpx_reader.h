@@ -74,6 +74,8 @@ struct Hill {
     double      avg_grade_pct = 0.0;   // gain_m / distance_m * 100
     std::string start_time;
     std::string end_time;
+    double      avg_power_w   = 0.0;   // mean estimated power over the climb (W)
+    bool        has_power     = false; // true once attach_climb_power() fills it
 };
 
 // ---------------------------------------------------------------------------
@@ -93,6 +95,42 @@ struct BestSegment {
     double      end_lat       = 0.0;
     double      end_lon       = 0.0;
     bool        valid         = false; // false if window larger than track
+};
+
+// ---------------------------------------------------------------------------
+// Power estimation (Strava-style physics model)
+// ---------------------------------------------------------------------------
+
+struct PowerParams {
+    // Mass is optional on the CLI: default rider + bike = 80 kg total, so
+    // estimation runs by default. Flags override any of these.
+    double total_mass_kg  = 80.0;   // rider + bike + kit
+    double crr            = 0.005;  // rolling resistance coefficient (road tyre)
+    double cda            = 0.32;   // drag area CdA in m^2 (rider on hoods)
+    double drivetrain_eff = 0.977;  // 1 - drivetrain loss (~2.3%)
+    double default_rho    = 1.225;  // fallback air density if no temp/elevation
+    bool   clamp_negative = true;   // clamp coasting/downhill power to 0 W
+};
+
+struct PowerStats {
+    bool   valid          = false;
+    double avg_power_w     = 0.0;   // mean estimated power over moving samples
+    double max_power_w     = 0.0;
+    double total_kj        = 0.0;   // work done = sum(P * dt) / 1000
+    bool   has_measured    = false; // set if the track carried <power>
+    double avg_measured_w  = 0.0;
+    double mean_abs_err_w  = 0.0;   // mean |estimated - measured|
+    double mean_bias_w     = 0.0;   // mean (estimated - measured)
+};
+
+// Full result of estimate_power(): the summary plus the per-point series that
+// drives the hills-table column and the time-vs-power CSV.
+struct PowerAnalysis {
+    PowerStats          stats;
+    std::vector<double> point_power_w;  // size == points.size(); index 0 == 0.0,
+                                        // index i = est. power on step (i-1 -> i)
+    std::vector<long>   t_offset_s;     // size == points.size(); seconds from the
+                                        // first point (-1 if timestamp unknown)
 };
 
 // ---------------------------------------------------------------------------
@@ -123,6 +161,16 @@ public:
     /// A hill requires grade >= MIN_GRADE_PCT and total gain >= MIN_GAIN_M.
     /// Short flat/downhill gaps up to GAP_TOLERANCE_M are absorbed.
     std::vector<Hill> detect_hills(std::size_t track_index = 0) const;
+
+    /// Estimate power along the track using the physics model in PowerParams.
+    /// Returns a summary plus a per-point power series.
+    PowerAnalysis estimate_power(const PowerParams& params,
+                                 std::size_t track_index = 0) const;
+
+    /// Fill each hill's avg_power_w by averaging the per-point power series
+    /// over the climb's index range. Safe to call with any hills/analysis.
+    void attach_climb_power(std::vector<Hill>& hills,
+                            const PowerAnalysis& pa) const;
 
 private:
     GpxData     data_;

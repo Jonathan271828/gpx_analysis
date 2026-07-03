@@ -521,3 +521,162 @@ std::vector<Hill> GpxReader::detect_hills(std::size_t track_index) const
 
     return hills;
 }
+
+// ---------------------------------------------------------------------------
+// Power model helpers
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// Air density (kg/m^3) from elevation and (optional) air temperature.
+/// Barometric pressure via the International Standard Atmosphere, then the
+/// ideal-gas law with the actual temperature. Falls back to `fallback` for
+/// absurd inputs. Returns ~1.225 at sea level / 15 C.
+double air_density(double ele_m, double temp_c, bool has_temp, double fallback) {
+    constexpr double P0 = 101325.0;        // Pa, sea-level pressure
+    constexpr double T0 = 288.15;          // K,  sea-level standard temperature
+    constexpr double L  = 0.0065;          // K/m, tropospheric lapse rate
+    constexpr double R_SPECIFIC = 287.05;  // J/(kg K), dry air
+
+    const double base = 1.0 - (L * ele_m) / T0;
+    if (base <= 0.0) return fallback;      // guard against nonsensical elevation
+    const double p = P0 * std::pow(base, 5.257);
+    const double T = (has_temp ? temp_c : 15.0) + 273.15;
+    if (T <= 0.0) return fallback;
+    return p / (R_SPECIFIC * T);
+}
+
+/// Instantaneous pedal power (W) for one step. Sum of the four resistive
+/// forces times ground speed, divided by drivetrain efficiency. `v_hw` is the
+/// headwind component (0 until wind support is added). No clamping here.
+double power_at_step(double v, double a, double grade, double rho,
+                     const PowerParams& p, double v_hw = 0.0) {
+    constexpr double G = 9.8067;           // m/s^2
+    const double theta = std::atan(grade);
+    const double m = p.total_mass_kg;
+
+    const double f_gravity = m * G * std::sin(theta);
+    const double f_rolling = m * G * std::cos(theta) * p.crr;
+    const double v_as      = v + v_hw;     // airspeed
+    // With v_hw == 0 the square is exact; for the future wind phase use
+    // std::fabs(v_as) * v_as so a strong tailwind reverses the force.
+    const double f_aero    = 0.5 * rho * p.cda * v_as * v_as;
+    const double f_accel   = m * a;
+
+    const double force = f_gravity + f_rolling + f_aero + f_accel;
+    return (force * v) / p.drivetrain_eff;
+}
+
+} // namespace
+
+// ---------------------------------------------------------------------------
+// GpxReader::estimate_power
+// ---------------------------------------------------------------------------
+
+PowerAnalysis GpxReader::estimate_power(const PowerParams& params,
+                                        std::size_t track_index) const
+{
+    PowerAnalysis pa;
+    if (track_index >= data_.tracks.size()) return pa;
+
+    const auto& pts = data_.tracks[track_index].points;
+    const std::size_t n = pts.size();
+    if (n < 2 || params.total_mass_kg <= 0.0) return pa;
+
+    std::vector<double>      cum_dist;
+    std::vector<std::time_t> timestamps;
+    build_tables(pts, cum_dist, timestamps);
+
+    pa.point_power_w.assign(n, 0.0);
+
+    // Elapsed seconds from the first point (for the time-vs-power CSV)
+    pa.t_offset_s.assign(n, -1);
+    const std::time_t t0 = timestamps.front();
+    if (t0 >= 0) {
+        for (std::size_t i = 0; i < n; ++i)
+            if (timestamps[i] >= 0)
+                pa.t_offset_s[i] = static_cast<long>(timestamps[i] - t0);
+    }
+
+    double      sum = 0.0, energy_j = 0.0, max_p = 0.0;
+    std::size_t count = 0;
+    double      prev_v = 0.0;
+    bool        have_prev_v = false;
+
+    double      meas_sum = 0.0, abs_err_sum = 0.0, bias_sum = 0.0;
+    std::size_t meas_count = 0;
+
+    for (std::size_t i = 1; i < n; ++i) {
+        // A gap in timestamps breaks the acceleration chain
+        if (timestamps[i] < 0 || timestamps[i - 1] < 0) { have_prev_v = false; continue; }
+        const long dt = static_cast<long>(timestamps[i] - timestamps[i - 1]);
+        if (dt <= 0) { have_prev_v = false; continue; }
+
+        const double dist  = cum_dist[i] - cum_dist[i - 1];
+        const double v     = dist / static_cast<double>(dt);
+        const double dele  = pts[i].ele - pts[i - 1].ele;
+        const double grade = (dist >= 1.0) ? (dele / dist) : 0.0;
+        const double a     = have_prev_v ? (v - prev_v) / static_cast<double>(dt) : 0.0;
+        prev_v = v; have_prev_v = true;
+
+        const double rho = air_density(pts[i].ele, pts[i].atemp, pts[i].has_atemp,
+                                       params.default_rho);
+        double P = power_at_step(v, a, grade, rho, params);
+        if (params.clamp_negative && P < 0.0) P = 0.0;
+
+        pa.point_power_w[i] = P;
+        sum      += P;
+        energy_j += P * static_cast<double>(dt);
+        if (P > max_p) max_p = P;
+        ++count;
+
+        if (pts[i].has_power) {
+            const double meas = static_cast<double>(pts[i].power);
+            meas_sum    += meas;
+            abs_err_sum += std::fabs(P - meas);
+            bias_sum    += (P - meas);
+            ++meas_count;
+        }
+    }
+
+    if (count > 0) {
+        pa.stats.valid       = true;
+        pa.stats.avg_power_w = sum / static_cast<double>(count);
+        pa.stats.max_power_w = max_p;
+        pa.stats.total_kj    = energy_j / 1000.0;
+    }
+    if (meas_count > 0) {
+        pa.stats.has_measured   = true;
+        pa.stats.avg_measured_w = meas_sum    / static_cast<double>(meas_count);
+        pa.stats.mean_abs_err_w = abs_err_sum / static_cast<double>(meas_count);
+        pa.stats.mean_bias_w    = bias_sum    / static_cast<double>(meas_count);
+    }
+
+    return pa;
+}
+
+// ---------------------------------------------------------------------------
+// GpxReader::attach_climb_power
+// ---------------------------------------------------------------------------
+
+void GpxReader::attach_climb_power(std::vector<Hill>& hills,
+                                   const PowerAnalysis& pa) const
+{
+    const std::size_t n = pa.point_power_w.size();
+    if (n == 0) return;
+
+    for (Hill& h : hills) {
+        if (h.end_idx >= n || h.end_idx <= h.start_idx) continue;
+        double      s = 0.0;
+        std::size_t c = 0;
+        // Average the step powers within the climb: indices (start_idx, end_idx]
+        for (std::size_t k = h.start_idx + 1; k <= h.end_idx; ++k) {
+            s += pa.point_power_w[k];
+            ++c;
+        }
+        if (c > 0) {
+            h.avg_power_w = s / static_cast<double>(c);
+            h.has_power   = true;
+        }
+    }
+}

@@ -10,7 +10,10 @@ time window.
 - Per-track statistics: distance, elevation gain/loss, duration, average speed,
   average temperature, heart rate, cadence and power, average climb and descent
   gradient
-- Hill detection table: distance, elevation gain and average grade per climb
+- Hill detection table: distance, elevation gain, average grade and average
+  estimated power per climb
+- Estimated power (Strava-style physics model) with optional comparison against
+  measured power, and a time-vs-power CSV export
 - Fastest segment finder: sliding-window search by distance or time
 - Multiple `--dist` and `--time` queries supported in a single run
 
@@ -37,9 +40,18 @@ The binary is placed at `build/gpx_reader`.
 ./build/gpx_reader <file.gpx> [options]
 
 Options:
-  --points N   print first N track points (default: 10, use 0 to suppress)
-  --dist  D    find fastest segment of D km    (e.g. --dist 5.0)
-  --time  T    find fastest segment of T s     (e.g. --time 300)
+  --points N       print first N track points (default: 10, use 0 to suppress)
+  --dist  D        find fastest segment of D km    (e.g. --dist 5.0)
+  --time  T        find fastest segment of T s     (e.g. --time 300)
+
+Power estimation (runs by default):
+  --mass  M        total rider+bike mass in kg (default: 80)
+  --rider R        rider mass in kg (summed with --bike if --mass unset)
+  --bike  B        bike mass in kg  (summed with --rider if --mass unset)
+  --crr   C        rolling resistance coefficient (default: 0.005)
+  --cda   A        aerodynamic drag area CdA in m^2 (default: 0.32)
+  --drivetrain E   drivetrain efficiency 0..1 (default: 0.977)
+  --power-csv F    write a time-vs-power CSV to file F
 ```
 
 Multiple `--dist` and `--time` flags are supported and each is reported
@@ -48,8 +60,11 @@ separately.
 ### Examples
 
 ```bash
-# Basic run — show first 10 track points and overall statistics
+# Basic run — points, statistics, hills (with per-climb power) and power estimate
 ./build/gpx_reader ride.gpx
+
+# Custom mass and aerodynamics, plus a time-vs-power CSV
+./build/gpx_reader ride.gpx --points 0 --mass 78 --cda 0.30 --power-csv power.csv
 
 # Suppress point listing; find fastest 1 km, 5 km, 5-minute and 10-minute segments
 ./build/gpx_reader ride.gpx --points 0 --dist 1.0 --dist 5.0 --time 300 --time 600
@@ -159,7 +174,18 @@ One row per detected climb, listed in chronological order.
 | Avg grade | Mean gradient over the climb distance (%) |
 | Start ele | Elevation at the start of the climb in m |
 | End ele | Elevation at the peak in m |
+| Avg power | Mean estimated power over the climb in watts |
 | Start time | ISO-8601 timestamp at the start of the climb |
+
+### Estimated power block
+
+| Field | Description |
+|---|---|
+| Model | Mass, Crr, CdA and drivetrain efficiency used |
+| Avg / Max est. power | Mean / maximum estimated power in watts |
+| Work done | Total mechanical work in kJ |
+| Measured avg | Mean measured power (only if `<power>` present) |
+| Mean abs error / bias | Estimate-vs-measured error (only if `<power>` present) |
 
 ### Fastest segment block
 
@@ -194,6 +220,54 @@ query, then the right pointer advances until the window satisfies the requested
 size. The window with the highest average speed (`distance / duration`) is
 kept. If the requested window is larger than the entire track, the result is
 marked invalid and a notice is printed.
+
+## Power estimation
+
+Power is estimated from the track kinematics using the same physics model
+Strava uses (the Martin et al. 1998 road-cycling model). For each step, power at
+the pedals is the sum of four resistive forces multiplied by ground speed,
+divided by drivetrain efficiency:
+
+```
+P = (1/η) · [ P_gravity + P_rolling + P_aero + P_accel ]
+
+P_gravity = m · g · sin(θ) · v          (climbing)
+P_rolling = m · g · cos(θ) · Crr · v    (rolling resistance)
+P_aero    = ½ · ρ · CdA · (v + v_hw)² · v   (air resistance)
+P_accel   = m · a · v                   (acceleration)
+```
+
+where `θ = atan(grade)`, `v` = ground speed, `a` = acceleration and `v_hw` = the
+headwind component. `v` is the rider's speed over the ground; `(v + v_hw)` is the
+airspeed the drag force depends on. Wind is not yet modelled, so `v_hw = 0` and
+the aero term reduces to `½·ρ·CdA·v³`.
+
+| Parameter | Default | Notes |
+|---|---|---|
+| Mass (rider+bike) | 80 kg | `--mass`, or `--rider` + `--bike` |
+| `Crr` | 0.005 | quality road tyres on asphalt (`--crr`) |
+| `CdA` | 0.32 m² | rider on the hoods (`--cda`) |
+| Drivetrain efficiency | 0.977 | ≈2.3 % loss (`--drivetrain`) |
+| Air density `ρ` | computed | from elevation + air temperature; 1.225 fallback |
+
+Air density is computed per point from elevation (International Standard
+Atmosphere barometric pressure) and, when present, the recorded air temperature.
+Coasting/downhill samples that yield negative power are clamped to 0 W.
+
+The estimate is reported as average/max power and total work (kJ), each climb in
+the hills table gets an **average power** column, and — when the GPX carries a
+measured `<power>` channel — the summary also prints the measured average, mean
+absolute error and mean bias so the estimate can be validated. `--power-csv F`
+writes a `time,elapsed_s,est_power_w[,measured_power_w]` row per track point.
+
+**Accuracy caveats:** like Strava, the model cannot see wind, exact tyre/surface
+`Crr`, or real rider aerodynamics, so absolute numbers are approximate — most
+accurate on sustained climbs where gravity dominates.
+
+**Planned extension — wind:** `v_hw` is already a parameter of the core model.
+Adding wind means computing rider heading from consecutive GPS points, obtaining
+wind speed/direction (weather API or sidecar file), projecting it onto the
+heading, and passing the result in — no change to the equation itself.
 
 ## GPX format support
 
