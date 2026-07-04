@@ -641,6 +641,8 @@ PowerAnalysis GpxReader::estimate_power(const PowerParams& params,
 
     pa.point_power_w.assign(n, 0.0);
     pa.headwind_ms.assign(n, 0.0);
+    pa.cum_dist_m = cum_dist;        // per-point cumulative distance (index 0 == 0)
+    pa.speed_ms.assign(n, 0.0);      // per-step ground speed (index 0 == 0)
 
     // Elapsed seconds from the first point (for the time-vs-power CSV)
     pa.t_offset_s.assign(n, -1);
@@ -670,6 +672,7 @@ PowerAnalysis GpxReader::estimate_power(const PowerParams& params,
 
         const double dist  = cum_dist[i] - cum_dist[i - 1];
         const double v     = dist / static_cast<double>(dt);
+        pa.speed_ms[i]     = v;
         const double dele  = pts[i].ele - pts[i - 1].ele;
         const double grade = (dist >= 1.0) ? (dele / dist) : 0.0;
         const double a     = have_prev_v ? (v - prev_v) / static_cast<double>(dt) : 0.0;
