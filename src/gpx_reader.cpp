@@ -653,6 +653,81 @@ PowerAnalysis GpxReader::estimate_power(const PowerParams& params,
                 pa.t_offset_s[i] = static_cast<long>(timestamps[i] - t0);
     }
 
+    // --- Pass 1: raw per-step kinematics -----------------------------------
+    // Speed comes from GPS distance, so a few metres of position noise on a 1 s
+    // step implies a large spurious speed/acceleration. Collect the raw series
+    // first; the model is evaluated in pass 2 from a smoothed speed so jitter
+    // can't produce physically impossible power spikes.
+    std::vector<double> v_raw(n, 0.0);   // ground speed on step (i-1 -> i)
+    std::vector<double> dt_s (n, 0.0);   // step duration (s)
+    std::vector<double> grade(n, 0.0);   // step grade (rise/run)
+    std::vector<double> rho_s(n, params.default_rho);
+    std::vector<double> vhw_s(n, 0.0);   // per-step headwind component
+    std::vector<char>   ok   (n, 0);     // 1 if the step has usable time/speed
+
+    double      hw_sum = 0.0;
+    std::size_t hw_count = 0;
+
+    for (std::size_t i = 1; i < n; ++i) {
+        if (timestamps[i] < 0 || timestamps[i - 1] < 0) continue;
+        const long dt = static_cast<long>(timestamps[i] - timestamps[i - 1]);
+        if (dt <= 0) continue;
+        // A long step is a stop or signal dropout, not riding: leave it as a gap
+        // (ok stays 0) so it contributes no power and breaks the accel/smoothing
+        // chains. GPS elevation drift across such a step would otherwise fake a
+        // huge climb and a power spike.
+        if (dt > params.max_gap_s) continue;
+
+        const double dist = cum_dist[i] - cum_dist[i - 1];
+        v_raw[i]          = dist / static_cast<double>(dt);
+        // Reject GPS teleports: a step faster than any real ride is position
+        // noise, so cap it before it can pollute speed/aero (raw or smoothed).
+        if (v_raw[i] > params.max_speed_ms) v_raw[i] = params.max_speed_ms;
+        dt_s[i]           = static_cast<double>(dt);
+        pa.speed_ms[i]    = v_raw[i];     // reported (de-spiked) ground speed
+        const double dele = pts[i].ele - pts[i - 1].ele;
+        grade[i]          = (dist >= 1.0) ? (dele / dist) : 0.0;
+        // Clamp to a real-world road gradient; drift-driven slopes are noise.
+        if (grade[i] >  params.max_grade) grade[i] =  params.max_grade;
+        if (grade[i] < -params.max_grade) grade[i] = -params.max_grade;
+        rho_s[i]          = air_density(pts[i].ele, pts[i].atemp, pts[i].has_atemp,
+                                        params.default_rho);
+
+        if (wind && wind->valid) {
+            double ws, wd;
+            if (wind->sample(timestamps[i], ws, wd)) {
+                const double heading = bearing_deg(pts[i - 1].lat, pts[i - 1].lon,
+                                                   pts[i].lat, pts[i].lon);
+                vhw_s[i]          = headwind_component(heading, wd, ws);
+                pa.headwind_ms[i] = vhw_s[i];
+                hw_sum += vhw_s[i];
+                ++hw_count;
+            }
+        }
+        ok[i] = 1;
+    }
+
+    // --- Speed smoothing: centred time-window moving average ----------------
+    std::vector<double> v_sm = v_raw;
+    if (params.smooth_window_s > 0.0) {
+        const long half = static_cast<long>(params.smooth_window_s / 2.0 + 0.5);
+        for (std::size_t i = 1; i < n; ++i) {
+            if (!ok[i]) continue;
+            double sum_v = v_raw[i];
+            long   cnt   = 1;
+            for (std::size_t j = i - 1; j >= 1; --j) {          // walk left in time
+                if (!ok[j] || pa.t_offset_s[i] - pa.t_offset_s[j] > half) break;
+                sum_v += v_raw[j]; ++cnt;
+            }
+            for (std::size_t j = i + 1; j < n; ++j) {           // walk right in time
+                if (!ok[j] || pa.t_offset_s[j] - pa.t_offset_s[i] > half) break;
+                sum_v += v_raw[j]; ++cnt;
+            }
+            v_sm[i] = sum_v / static_cast<double>(cnt);
+        }
+    }
+
+    // --- Pass 2: power from smoothed speed ----------------------------------
     double      sum = 0.0, energy_j = 0.0, max_p = 0.0;
     std::size_t count = 0;
     double      prev_v = 0.0;
@@ -661,46 +736,22 @@ PowerAnalysis GpxReader::estimate_power(const PowerParams& params,
     double      meas_sum = 0.0, abs_err_sum = 0.0, bias_sum = 0.0;
     std::size_t meas_count = 0;
 
-    double      hw_sum = 0.0;
-    std::size_t hw_count = 0;
-
     for (std::size_t i = 1; i < n; ++i) {
-        // A gap in timestamps breaks the acceleration chain
-        if (timestamps[i] < 0 || timestamps[i - 1] < 0) { have_prev_v = false; continue; }
-        const long dt = static_cast<long>(timestamps[i] - timestamps[i - 1]);
-        if (dt <= 0) { have_prev_v = false; continue; }
+        if (!ok[i]) { have_prev_v = false; continue; }  // gap breaks accel chain
 
-        const double dist  = cum_dist[i] - cum_dist[i - 1];
-        const double v     = dist / static_cast<double>(dt);
-        pa.speed_ms[i]     = v;
-        const double dele  = pts[i].ele - pts[i - 1].ele;
-        const double grade = (dist >= 1.0) ? (dele / dist) : 0.0;
-        const double a     = have_prev_v ? (v - prev_v) / static_cast<double>(dt) : 0.0;
+        const double v = v_sm[i];
+        double a = have_prev_v ? (v - prev_v) / dt_s[i] : 0.0;
+        // Backstop clamp: no rider sustains this acceleration; the rest is noise.
+        if (a >  params.max_accel_ms2) a =  params.max_accel_ms2;
+        if (a < -params.max_accel_ms2) a = -params.max_accel_ms2;
         prev_v = v; have_prev_v = true;
 
-        const double rho = air_density(pts[i].ele, pts[i].atemp, pts[i].has_atemp,
-                                       params.default_rho);
-
-        // Headwind component from wind data, if available for this point
-        double v_hw = 0.0;
-        if (wind && wind->valid) {
-            double ws, wd;
-            if (wind->sample(timestamps[i], ws, wd)) {
-                const double heading = bearing_deg(pts[i - 1].lat, pts[i - 1].lon,
-                                                   pts[i].lat, pts[i].lon);
-                v_hw = headwind_component(heading, wd, ws);
-                pa.headwind_ms[i] = v_hw;
-                hw_sum += v_hw;
-                ++hw_count;
-            }
-        }
-
-        double P = power_at_step(v, a, grade, rho, params, v_hw);
+        double P = power_at_step(v, a, grade[i], rho_s[i], params, vhw_s[i]);
         if (params.clamp_negative && P < 0.0) P = 0.0;
 
         pa.point_power_w[i] = P;
         sum      += P;
-        energy_j += P * static_cast<double>(dt);
+        energy_j += P * dt_s[i];
         if (P > max_p) max_p = P;
         ++count;
 
@@ -757,4 +808,159 @@ void GpxReader::attach_climb_power(std::vector<Hill>& hills,
             h.has_power   = true;
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Per-step power series helpers (shared by power_curve and power_histogram)
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// Measured power on step (i-1 -> i): average of the two endpoints when both
+/// carry <power>, otherwise whichever endpoint has it (0 if neither).
+double measured_step_power(const std::vector<TrackPoint>& pts, std::size_t i)
+{
+    const bool a = pts[i - 1].has_power;
+    const bool b = pts[i].has_power;
+    if (a && b) return 0.5 * (pts[i - 1].power + pts[i].power);
+    if (b)      return static_cast<double>(pts[i].power);
+    if (a)      return static_cast<double>(pts[i - 1].power);
+    return 0.0;
+}
+
+} // namespace
+
+// ---------------------------------------------------------------------------
+// GpxReader::power_curve
+// ---------------------------------------------------------------------------
+
+PowerCurve GpxReader::power_curve(const PowerAnalysis&     pa,
+                                  const std::vector<long>& durations_s,
+                                  std::size_t              track_index) const
+{
+    PowerCurve curve;
+    if (track_index >= data_.tracks.size() || !pa.stats.valid) return curve;
+
+    const auto&       pts = data_.tracks[track_index].points;
+    const std::size_t n   = pts.size();
+    if (n < 2 || pa.point_power_w.size() != n || pa.t_offset_s.size() != n)
+        return curve;
+
+    const bool has_meas = pa.stats.has_measured;
+
+    // Cumulative time and energy (index 0 == 0). Steps with an unusable
+    // timestamp contribute nothing, so windows can't accrue phantom energy.
+    std::vector<double> ct(n, 0.0);       // cumulative valid seconds
+    std::vector<double> ce_est(n, 0.0);   // cumulative estimated energy (J)
+    std::vector<double> ce_meas(n, 0.0);  // cumulative measured energy (J)
+
+    for (std::size_t i = 1; i < n; ++i) {
+        double dt = 0.0;
+        if (pa.t_offset_s[i] >= 0 && pa.t_offset_s[i - 1] >= 0) {
+            const long d = pa.t_offset_s[i] - pa.t_offset_s[i - 1];
+            if (d > 0) dt = static_cast<double>(d);
+        }
+        ct[i]     = ct[i - 1]     + dt;
+        ce_est[i] = ce_est[i - 1] + pa.point_power_w[i] * dt;
+        if (has_meas)
+            ce_meas[i] = ce_meas[i - 1] + measured_step_power(pts, i) * dt;
+    }
+
+    const double total = ct.back();
+    if (total <= 0.0) return curve;
+
+    curve.has_measured = has_meas;
+
+    for (long D : durations_s) {
+        if (D <= 0 || static_cast<double>(D) > total) continue;
+
+        // Two-pointer sliding window maximising energy/time over windows of at
+        // least D seconds (mirrors fastest_by_time, energy in place of distance).
+        double best_est = 0.0, best_meas = 0.0;
+        bool   found    = false;
+        std::size_t hi  = 1;
+        for (std::size_t lo = 0; lo < n - 1; ++lo) {
+            while (hi < n - 1 && (ct[hi] - ct[lo]) < static_cast<double>(D))
+                ++hi;
+            const double span = ct[hi] - ct[lo];
+            if (span < static_cast<double>(D)) continue;
+
+            const double avg_est = (ce_est[hi] - ce_est[lo]) / span;
+            if (!found || avg_est > best_est) {
+                best_est = avg_est;
+                if (has_meas) best_meas = (ce_meas[hi] - ce_meas[lo]) / span;
+                found = true;
+            }
+        }
+        if (!found) continue;
+
+        curve.duration_s.push_back(D);
+        curve.est_power_w.push_back(best_est);
+        if (has_meas) curve.meas_power_w.push_back(best_meas);
+    }
+
+    curve.valid = !curve.duration_s.empty();
+    return curve;
+}
+
+// ---------------------------------------------------------------------------
+// GpxReader::power_histogram
+// ---------------------------------------------------------------------------
+
+PowerHistogram GpxReader::power_histogram(const PowerAnalysis& pa,
+                                          double               bin_w,
+                                          std::size_t          track_index) const
+{
+    PowerHistogram hist;
+    if (track_index >= data_.tracks.size() || !pa.stats.valid) return hist;
+    if (bin_w <= 0.0) bin_w = 25.0;
+
+    const auto&       pts = data_.tracks[track_index].points;
+    const std::size_t n   = pts.size();
+    if (n < 2 || pa.point_power_w.size() != n || pa.t_offset_s.size() != n)
+        return hist;
+
+    const bool has_meas = pa.stats.has_measured;
+    hist.bin_w        = bin_w;
+    hist.has_measured = has_meas;
+
+    // First pass: find how many bins we need (largest observed power).
+    double max_p = 0.0;
+    for (std::size_t i = 1; i < n; ++i) {
+        if (pa.point_power_w[i] > max_p) max_p = pa.point_power_w[i];
+        if (has_meas) {
+            const double m = measured_step_power(pts, i);
+            if (m > max_p) max_p = m;
+        }
+    }
+    const std::size_t nbins =
+        static_cast<std::size_t>(std::floor(max_p / bin_w)) + 1;
+
+    hist.bin_lo_w.resize(nbins);
+    hist.est_seconds.assign(nbins, 0.0);
+    if (has_meas) hist.meas_seconds.assign(nbins, 0.0);
+    for (std::size_t b = 0; b < nbins; ++b)
+        hist.bin_lo_w[b] = static_cast<double>(b) * bin_w;
+
+    for (std::size_t i = 1; i < n; ++i) {
+        if (pa.t_offset_s[i] < 0 || pa.t_offset_s[i - 1] < 0) continue;
+        const long d = pa.t_offset_s[i] - pa.t_offset_s[i - 1];
+        if (d <= 0) continue;
+        const double dt = static_cast<double>(d);
+
+        std::size_t be = static_cast<std::size_t>(
+            std::floor(pa.point_power_w[i] / bin_w));
+        if (be >= nbins) be = nbins - 1;
+        hist.est_seconds[be] += dt;
+
+        if (has_meas) {
+            std::size_t bm = static_cast<std::size_t>(
+                std::floor(measured_step_power(pts, i) / bin_w));
+            if (bm >= nbins) bm = nbins - 1;
+            hist.meas_seconds[bm] += dt;
+        }
+    }
+
+    hist.valid = nbins > 0;
+    return hist;
 }
