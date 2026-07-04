@@ -136,6 +136,10 @@ struct PowerAnalysis {
                                         // first point (-1 if timestamp unknown)
     std::vector<double> headwind_ms;    // size == points.size(); per-step headwind
                                         // component (m/s), 0 if no wind applied
+    std::vector<double> cum_dist_m;     // size == points.size(); cumulative distance
+                                        // from the first point (m); index 0 == 0.0
+    std::vector<double> speed_ms;       // size == points.size(); instantaneous ground
+                                        // speed on step (i-1 -> i); index 0 == 0.0
 };
 
 // ---------------------------------------------------------------------------

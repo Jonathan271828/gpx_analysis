@@ -264,6 +264,88 @@ static bool write_power_csv(const std::string&   path,
 }
 
 // ---------------------------------------------------------------------------
+// Write a primitive XY data table (whitespace-separated, #-commented header)
+//
+// One row per track point, columns in the order requested:
+//   time (s), distance (km), velocity (km/h), heart rate, power (W),
+//   temperature, then everything else we carry. Sensor columns
+//   (hr/power/temp/cadence/headwind) are only
+//   emitted when the track actually contains that field; per-point gaps within
+//   an emitted column are written as NaN so the table stays rectangular and
+//   loads cleanly in gnuplot/numpy.
+// ---------------------------------------------------------------------------
+
+static bool write_xy_file(const std::string&   path,
+                          const Track&          track,
+                          const TrackStats&     stats,
+                          const PowerAnalysis&  pa)
+{
+    std::ofstream out(path);
+    if (!out) return false;
+
+    const auto& pts      = track.points;
+    const bool  has_hr   = stats.has_hr;
+    const bool  has_pw   = stats.has_power;    // measured power
+    const bool  has_temp = stats.has_atemp;
+    const bool  has_cad  = stats.has_cad;
+    const bool  has_wind = pa.stats.has_wind;
+    const bool  has_est  = pa.stats.valid;     // estimated power series
+
+    // Commented header: column index + name/unit, one line, starts with '#'.
+    out << "# GPXAna per-point track data\n";
+    if (!track.name.empty()) out << "# track: " << track.name << "\n";
+    out << "#";
+    int col = 1;
+    out << " " << col++ << ":elapsed_s"
+        << " " << col++ << ":distance_km"
+        << " " << col++ << ":velocity_kmh";
+    if (has_hr)   out << " " << col++ << ":hr_bpm";
+    if (has_pw)   out << " " << col++ << ":power_w";
+    if (has_temp) out << " " << col++ << ":temp_C";
+    if (has_cad)  out << " " << col++ << ":cadence_rpm";
+    out << " " << col++ << ":elevation_m"
+        << " " << col++ << ":lat"
+        << " " << col++ << ":lon";
+    if (has_est)  out << " " << col++ << ":est_power_w";
+    if (has_wind) out << " " << col++ << ":headwind_ms";
+    out << "\n";
+
+    for (std::size_t i = 0; i < pts.size(); ++i) {
+        const auto& p = pts[i];
+        std::ostringstream row;
+        row << std::fixed;
+
+        // time (elapsed seconds; NaN if the timestamp was unparseable)
+        if (pa.t_offset_s[i] >= 0) row << pa.t_offset_s[i];
+        else                       row << "NaN";
+
+        // distance (km) and velocity (km/h)
+        row << ' ' << std::setprecision(3) << pa.cum_dist_m[i] / 1000.0;
+        if (i == 0) row << ' ' << "NaN";                 // no step into point 0
+        else        row << ' ' << std::setprecision(2) << pa.speed_ms[i] * 3.6;
+
+        if (has_hr)   row << ' ' << (p.has_hr    ? std::to_string(p.hr)  : "NaN");
+        if (has_pw)   row << ' ' << (p.has_power ? std::to_string(p.power): "NaN");
+        if (has_temp) {
+            row << ' ';
+            if (p.has_atemp) row << std::setprecision(1) << p.atemp;
+            else             row << "NaN";
+        }
+        if (has_cad)  row << ' ' << (p.has_cad   ? std::to_string(p.cad) : "NaN");
+
+        row << ' ' << std::setprecision(2) << p.ele
+            << ' ' << std::setprecision(6) << p.lat
+            << ' ' << std::setprecision(6) << p.lon;
+
+        if (has_est)  row << ' ' << std::setprecision(1) << pa.point_power_w[i];
+        if (has_wind) row << ' ' << std::setprecision(2) << pa.headwind_ms[i];
+
+        out << row.str() << '\n';
+    }
+    return true;
+}
+
+// ---------------------------------------------------------------------------
 // Obtain wind data for a track (network fetch and/or JSON cache/file)
 // ---------------------------------------------------------------------------
 
@@ -344,6 +426,7 @@ static void print_usage(const char* prog) {
               << "  --cda   A        aerodynamic drag area CdA in m^2 (default: 0.32)\n"
               << "  --drivetrain E   drivetrain efficiency 0..1 (default: 0.977)\n"
               << "  --power-csv F    write a time-vs-power CSV to file F\n"
+              << "  --xy F           write all per-point data as a #-commented XY table to F\n"
               << "\nWind (Open-Meteo historical API; improves the aero term):\n"
               << "  --wind           fetch historical wind and apply it\n"
               << "  --wind-cache F   like --wind, but cache to/read from file F\n"
@@ -375,6 +458,7 @@ int main(int argc, char* argv[]) {
     bool        mass_set  = false;
     double      mass_total = 80.0;
     std::string power_csv;
+    std::string xy_path;
 
     WindMode    wind_mode = WindMode::Off;
     std::string wind_path;
@@ -401,6 +485,8 @@ int main(int argc, char* argv[]) {
             power.drivetrain_eff = std::atof(argv[++i]);
         } else if (arg == "--power-csv" && i + 1 < argc) {
             power_csv = argv[++i];
+        } else if (arg == "--xy" && i + 1 < argc) {
+            xy_path = argv[++i];
         } else if (arg == "--wind") {
             wind_mode = WindMode::Fetch;
         } else if (arg == "--wind-cache" && i + 1 < argc) {
@@ -465,6 +551,17 @@ int main(int argc, char* argv[]) {
                 std::cout << "Wrote time-vs-power CSV: " << out_path << "\n\n";
             else
                 std::cerr << "Error: could not write CSV to " << out_path << "\n";
+        }
+
+        // Optional primitive XY data table (suffix with track index when >1 track)
+        if (!xy_path.empty()) {
+            std::string out_path = (data.tracks.size() > 1)
+                                 ? xy_path + "." + std::to_string(i)
+                                 : xy_path;
+            if (write_xy_file(out_path, track, stats, pa))
+                std::cout << "Wrote XY data table: " << out_path << "\n\n";
+            else
+                std::cerr << "Error: could not write XY table to " << out_path << "\n";
         }
 
         // Fastest distance-based segments
