@@ -346,6 +346,55 @@ static bool write_xy_file(const std::string&   path,
 }
 
 // ---------------------------------------------------------------------------
+// Write the mean-maximal power curve as an XY table (duration vs watts)
+// ---------------------------------------------------------------------------
+
+static bool write_power_curve_file(const std::string& path,
+                                   const PowerCurve&  curve)
+{
+    std::ofstream out(path);
+    if (!out) return false;
+
+    out << "# GPXAna mean-maximal power curve (best average power per duration)\n";
+    out << "# 1:duration_s 2:est_power_w";
+    if (curve.has_measured) out << " 3:measured_power_w";
+    out << "\n";
+
+    out << std::fixed << std::setprecision(1);
+    for (std::size_t i = 0; i < curve.duration_s.size(); ++i) {
+        out << curve.duration_s[i] << ' ' << curve.est_power_w[i];
+        if (curve.has_measured) out << ' ' << curve.meas_power_w[i];
+        out << '\n';
+    }
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// Write the power histogram as an XY table (power band vs seconds in band)
+// ---------------------------------------------------------------------------
+
+static bool write_power_hist_file(const std::string&    path,
+                                  const PowerHistogram& hist)
+{
+    std::ofstream out(path);
+    if (!out) return false;
+
+    out << "# GPXAna power histogram (time in each " << std::fixed
+        << std::setprecision(0) << hist.bin_w << " W band)\n";
+    out << "# 1:power_w_lo 2:est_seconds";
+    if (hist.has_measured) out << " 3:measured_seconds";
+    out << "\n";
+
+    out << std::fixed << std::setprecision(1);
+    for (std::size_t b = 0; b < hist.bin_lo_w.size(); ++b) {
+        out << hist.bin_lo_w[b] << ' ' << hist.est_seconds[b];
+        if (hist.has_measured) out << ' ' << hist.meas_seconds[b];
+        out << '\n';
+    }
+    return true;
+}
+
+// ---------------------------------------------------------------------------
 // Obtain wind data for a track (network fetch and/or JSON cache/file)
 // ---------------------------------------------------------------------------
 
@@ -425,8 +474,16 @@ static void print_usage(const char* prog) {
               << "  --crr   C        rolling resistance coefficient (default: 0.005)\n"
               << "  --cda   A        aerodynamic drag area CdA in m^2 (default: 0.32)\n"
               << "  --drivetrain E   drivetrain efficiency 0..1 (default: 0.977)\n"
+              << "  --smooth S       GPS speed smoothing window in s, tames spikes (default: 5; 0 off)\n"
+              << "  --max-accel A    clamp on |acceleration| in m/s^2 (default: 3)\n"
+              << "  --max-speed V    cap on raw step speed in m/s, drops GPS teleports (default: 30)\n"
+              << "  --max-grade G    clamp on |grade| as a fraction (default: 0.30)\n"
+              << "  --max-gap S      steps longer than S seconds count as a stop (default: 10)\n"
               << "  --power-csv F    write a time-vs-power CSV to file F\n"
               << "  --xy F           write all per-point data as a #-commented XY table to F\n"
+              << "  --power-curve F  write mean-maximal power curve (duration vs W) to F\n"
+              << "  --power-hist F   write power histogram (time in each power band) to F\n"
+              << "  --hist-bin W     histogram bin width in watts (default: 25)\n"
               << "\nWind (Open-Meteo historical API; improves the aero term):\n"
               << "  --wind           fetch historical wind and apply it\n"
               << "  --wind-cache F   like --wind, but cache to/read from file F\n"
@@ -459,6 +516,9 @@ int main(int argc, char* argv[]) {
     double      mass_total = 80.0;
     std::string power_csv;
     std::string xy_path;
+    std::string power_curve_path;
+    std::string power_hist_path;
+    double      hist_bin_w = 25.0;
 
     WindMode    wind_mode = WindMode::Off;
     std::string wind_path;
@@ -483,10 +543,26 @@ int main(int argc, char* argv[]) {
             power.cda = std::atof(argv[++i]);
         } else if (arg == "--drivetrain" && i + 1 < argc) {
             power.drivetrain_eff = std::atof(argv[++i]);
+        } else if (arg == "--smooth" && i + 1 < argc) {
+            power.smooth_window_s = std::atof(argv[++i]);
+        } else if (arg == "--max-accel" && i + 1 < argc) {
+            power.max_accel_ms2 = std::atof(argv[++i]);
+        } else if (arg == "--max-speed" && i + 1 < argc) {
+            power.max_speed_ms = std::atof(argv[++i]);
+        } else if (arg == "--max-grade" && i + 1 < argc) {
+            power.max_grade = std::atof(argv[++i]);
+        } else if (arg == "--max-gap" && i + 1 < argc) {
+            power.max_gap_s = std::atof(argv[++i]);
         } else if (arg == "--power-csv" && i + 1 < argc) {
             power_csv = argv[++i];
         } else if (arg == "--xy" && i + 1 < argc) {
             xy_path = argv[++i];
+        } else if (arg == "--power-curve" && i + 1 < argc) {
+            power_curve_path = argv[++i];
+        } else if (arg == "--power-hist" && i + 1 < argc) {
+            power_hist_path = argv[++i];
+        } else if (arg == "--hist-bin" && i + 1 < argc) {
+            hist_bin_w = std::atof(argv[++i]);
         } else if (arg == "--wind") {
             wind_mode = WindMode::Fetch;
         } else if (arg == "--wind-cache" && i + 1 < argc) {
@@ -562,6 +638,38 @@ int main(int argc, char* argv[]) {
                 std::cout << "Wrote XY data table: " << out_path << "\n\n";
             else
                 std::cerr << "Error: could not write XY table to " << out_path << "\n";
+        }
+
+        // Optional mean-maximal power curve (suffix with track index when >1 track)
+        if (!power_curve_path.empty()) {
+            static const std::vector<long> kCurveDurations = {
+                1, 5, 10, 30, 60, 300, 600, 1200, 1800, 3600, 5400};
+            PowerCurve curve = reader.power_curve(pa, kCurveDurations, i);
+            std::string out_path = (data.tracks.size() > 1)
+                                 ? power_curve_path + "." + std::to_string(i)
+                                 : power_curve_path;
+            if (!curve.valid)
+                std::cerr << "Power curve: no usable power/time data — skipping "
+                          << out_path << "\n";
+            else if (write_power_curve_file(out_path, curve))
+                std::cout << "Wrote power curve: " << out_path << "\n\n";
+            else
+                std::cerr << "Error: could not write power curve to " << out_path << "\n";
+        }
+
+        // Optional power histogram (suffix with track index when >1 track)
+        if (!power_hist_path.empty()) {
+            PowerHistogram hist = reader.power_histogram(pa, hist_bin_w, i);
+            std::string out_path = (data.tracks.size() > 1)
+                                 ? power_hist_path + "." + std::to_string(i)
+                                 : power_hist_path;
+            if (!hist.valid)
+                std::cerr << "Power histogram: no usable power/time data — skipping "
+                          << out_path << "\n";
+            else if (write_power_hist_file(out_path, hist))
+                std::cout << "Wrote power histogram: " << out_path << "\n\n";
+            else
+                std::cerr << "Error: could not write power histogram to " << out_path << "\n";
         }
 
         // Fastest distance-based segments

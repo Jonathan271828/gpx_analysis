@@ -56,7 +56,16 @@ Power estimation (runs by default):
   --crr   C        rolling resistance coefficient (default: 0.005)
   --cda   A        aerodynamic drag area CdA in m^2 (default: 0.32)
   --drivetrain E   drivetrain efficiency 0..1 (default: 0.977)
+  --smooth S       GPS speed smoothing window in s, tames spikes (default: 5; 0 off)
+  --max-accel A    clamp on |acceleration| in m/s^2 (default: 3)
+  --max-speed V    cap on raw step speed in m/s, drops GPS teleports (default: 30)
+  --max-grade G    clamp on |grade| as a fraction (default: 0.30)
+  --max-gap  S     steps longer than S seconds count as a stop (default: 10)
   --power-csv F    write a time-vs-power CSV to file F
+  --xy F           write all per-point data as a #-commented XY table to F
+  --power-curve F  write mean-maximal power curve (duration vs W) to F
+  --power-hist F   write power histogram (time in each power band) to F
+  --hist-bin W     histogram bin width in watts (default: 25)
 
 Wind (Open-Meteo historical API; improves the aero term):
   --wind           fetch historical wind and apply it
@@ -78,7 +87,16 @@ separately.
 
 # Suppress point listing; find fastest 1 km, 5 km, 5-minute and 10-minute segments
 ./build/gpx_reader ride.gpx --points 0 --dist 1.0 --dist 5.0 --time 300 --time 600
+
+# Write a mean-maximal power curve and a power histogram (50 W bins)
+./build/gpx_reader ride.gpx --points 0 --power-curve curve.txt --power-hist hist.txt --hist-bin 50
 ```
+
+The power estimate is de-spiked before use: GPS speed is smoothed over a short
+window (`--smooth`), and acceleration, speed, grade and long stops are bounded
+(`--max-accel`, `--max-speed`, `--max-grade`, `--max-gap`) so position/elevation
+noise can't produce physically impossible power. Loosen or disable these
+(`--smooth 0`) to see the raw model output.
 
 ## Sample output
 

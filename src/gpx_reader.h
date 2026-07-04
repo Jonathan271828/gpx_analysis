@@ -111,6 +111,19 @@ struct PowerParams {
     double drivetrain_eff = 0.977;  // 1 - drivetrain loss (~2.3%)
     double default_rho    = 1.225;  // fallback air density if no temp/elevation
     bool   clamp_negative = true;   // clamp coasting/downhill power to 0 W
+    // GPS speed is noisy: a few metres of position error on a 1 s step implies a
+    // large spurious acceleration, which the m*a term turns into impossible
+    // power spikes. Smooth the speed over this window (s; 0 disables) and cap the
+    // acceleration as a backstop before evaluating the model.
+    double smooth_window_s = 5.0;   // centred moving-average window for speed
+    double max_accel_ms2   = 3.0;   // clamp on |acceleration| (m/s^2)
+    double max_speed_ms    = 30.0;  // cap on raw step speed (~108 km/h); a GPS
+                                    // teleport above this is noise, not a descent
+    double max_grade       = 0.30;  // clamp on |grade|; elevation drift over a
+                                    // short step can imply an impossible slope
+    double max_gap_s       = 10.0;  // steps longer than this are treated as a
+                                    // stop/dropout (0 W); GPS drift during a long
+                                    // pause otherwise fakes a big climb
 };
 
 struct PowerStats {
@@ -140,6 +153,26 @@ struct PowerAnalysis {
                                         // from the first point (m); index 0 == 0.0
     std::vector<double> speed_ms;       // size == points.size(); instantaneous ground
                                         // speed on step (i-1 -> i); index 0 == 0.0
+};
+
+// Mean-maximal power curve (Strava-style): for each duration, the best average
+// power sustained over any window of that length in the ride.
+struct PowerCurve {
+    bool                valid        = false;
+    bool                has_measured = false;
+    std::vector<long>   duration_s;      // durations actually emitted (ascending)
+    std::vector<double> est_power_w;     // best avg estimated power per duration
+    std::vector<double> meas_power_w;    // best avg measured power (if has_measured)
+};
+
+// Power histogram: time (seconds) spent in each fixed-width power band.
+struct PowerHistogram {
+    bool                valid        = false;
+    bool                has_measured = false;
+    double              bin_w        = 25.0;  // bin width in watts
+    std::vector<double> bin_lo_w;            // lower edge of each bin (W)
+    std::vector<double> est_seconds;         // time-in-bin for estimated power
+    std::vector<double> meas_seconds;        // time-in-bin for measured power (if any)
 };
 
 // ---------------------------------------------------------------------------
@@ -197,6 +230,20 @@ public:
     /// over the climb's index range. Safe to call with any hills/analysis.
     void attach_climb_power(std::vector<Hill>& hills,
                             const PowerAnalysis& pa) const;
+
+    /// Mean-maximal power curve: for each requested duration (seconds), the best
+    /// time-weighted average power over any window of that length. Durations
+    /// longer than the ride are skipped. Uses the estimated series in `pa`, plus
+    /// the measured <power> series when the track carries it.
+    PowerCurve power_curve(const PowerAnalysis& pa,
+                           const std::vector<long>& durations_s,
+                           std::size_t track_index = 0) const;
+
+    /// Power histogram: seconds spent in each `bin_w`-wide power band, for the
+    /// estimated series (and the measured series when present).
+    PowerHistogram power_histogram(const PowerAnalysis& pa,
+                                   double bin_w,
+                                   std::size_t track_index = 0) const;
 
 private:
     GpxData     data_;
