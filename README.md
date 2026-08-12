@@ -22,7 +22,10 @@ time window.
 - Training metrics: Normalized Power, Intensity Factor, TSS, Variability Index,
   energy (kJ/kcal) and watts-per-kilo
 - Power and heart-rate training-zone distributions (time in zone)
-- Aerobic decoupling (Pw:Hr) — a durability/fatigue indicator
+- Aerobic decoupling (Pw:Hr) and Efficiency Factor (NP/HR) — durability/fitness
+- Peak-power efforts table (best 5 s … 1 h, with where in the ride they occurred)
+- Quadrant analysis (pedal force × cadence) when the track has cadence
+- Anaerobic-reserve "matches" burned, from the W' balance
 - Per-distance split table (pace, power, HR, climbing per split)
 - Climb VAM and Strava-style HC/1–4 categorisation in the hills table
 - Critical-power model (CP and W') with an optional W'-balance export
@@ -65,6 +68,7 @@ Rider profile (training metrics):
   --lthr H         lactate-threshold HR in bpm (enables HR zones)
   --max-hr H       maximum HR in bpm (HR-zone fallback if no --lthr)
   --splits D       per-D-km split table (e.g. --splits 1.0)
+  --crank L        crank-arm length in mm for quadrant analysis (default: 172.5)
 
 Power estimation (runs by default):
   --mass  M        total rider+bike mass in kg (default: 80)
@@ -523,6 +527,8 @@ and body weight (`--weight`/`--rider`, default 71.3 kg).
 - **Variability Index (VI)** = NP / average power — pacing smoothness (≈1.0 steady,
   higher = surgy).
 - **Energy** in kJ and (≈ equal) kcal, and **watts-per-kilo** for average and NP.
+- **Efficiency Factor (EF)** = NP / average heart rate — an aerobic-fitness marker;
+  rising EF at the same effort over weeks means you're getting fitter.
 
 Moving time excludes stops (steps longer than 20 s are dropped).
 
@@ -539,6 +545,35 @@ Splits the moving time in half and compares the power-to-heart-rate ratio of eac
 half. A decoupling above ~5 % means heart rate drifted up for the same power —
 the classic fingerprint of fatigue, heat or dehydration; below ~5 % indicates
 good aerobic durability. Needs heart-rate data.
+
+### Peak power efforts
+
+The best average power sustained over each of a set of durations (5 s … 1 h),
+with the elapsed time and timestamp of where each effort occurred — e.g. "best
+5-min: 308 W starting at 58m44s". Uses measured power when the track carries it.
+
+### Quadrant analysis
+
+When the track has cadence, splits riding time into four quadrants around a
+crosshair set at FTP and 90 rpm, using average effective pedal force
+(AEPF = power / pedal velocity) and circumferential pedal velocity
+(CPV = cadence × 2π × crank / 60):
+
+- **Q2 high force / low cadence** — grinding big gears (muscular load)
+- **Q1 high force / high cadence** — hard, fast pedalling (sprints, attacks)
+- **Q4 low force / high cadence** — spinning easily
+- **Q3 low force / low cadence** — soft-pedalling / easy
+
+It shows the muscular-vs-cardiovascular character of the ride. Set crank length
+with `--crank` (mm).
+
+### Anaerobic reserve (W' matches)
+
+From the W'-balance series, counts the "matches" burned — distinct deep
+expenditures of the anaerobic reserve (a dip below 50 % of W' after recovering
+above 75 %) — plus the lowest balance reached and how much was left at the end.
+A quick read on how many hard efforts the ride demanded and whether you emptied
+the tank.
 
 ### Splits
 
@@ -626,7 +661,9 @@ detection and fastest-segment queries are run independently for each track.
     ├── metrics.hpp/.cpp   Training load (NP/IF/TSS/VI, energy, W/kg) + decoupling
     ├── zones.hpp/.cpp     Power and heart-rate time-in-zone distributions
     ├── splits.hpp/.cpp    Per-distance split table
-    ├── cp_model.hpp/.cpp  Critical-power (CP / W') fit from the power curve
+    ├── cp_model.hpp/.cpp  Critical-power (CP / W') fit, W'-balance + matches
+    ├── peaks.hpp/.cpp     Peak-power efforts with timestamps (namespace peaks)
+    ├── quadrant.hpp/.cpp  Force × cadence quadrant analysis (namespace quadrant)
     ├── trends.hpp/.cpp    Multi-ride CTL / ATL / TSB progression
     ├── wind.hpp/.cpp      Open-Meteo fetch/cache + per-track obtain() (namespace wind)
     ├── io_base.hpp/.cpp     Shared I/O helper (format_duration) — namespace io

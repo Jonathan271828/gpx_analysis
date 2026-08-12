@@ -22,6 +22,7 @@ void print_usage(const Char* prog, std::ostream& os) {
        << "  --lthr H         lactate-threshold heart rate in bpm (enables HR zones)\n"
        << "  --max-hr H       maximum heart rate in bpm (HR-zone fallback if no --lthr)\n"
        << "  --splits D       per-D-km split table (e.g. --splits 1.0)\n"
+       << "  --crank L        crank-arm length in mm for quadrant analysis (default: 172.5)\n"
        << "\nPower estimation (Strava-style physics model, runs by default):\n"
        << "  --mass  M        total rider+bike mass in kg (default: 80)\n"
        << "  --rider R        rider/body mass in kg (also W/kg; summed with --bike if --mass unset)\n"
@@ -90,6 +91,8 @@ Bool parse(Int argc, Char* argv[], Options& opts, std::string& error) {
             opts.max_hr = std::atof(argv[++i]);
         } else if (arg == "--splits" && i + 1 < argc) {
             opts.split_km = std::atof(argv[++i]);
+        } else if (arg == "--crank" && i + 1 < argc) {
+            opts.crank_length_m = std::atof(argv[++i]) / 1000.0;   // mm -> m
         } else if (arg == "--mass" && i + 1 < argc) {
             mass_total = std::atof(argv[++i]); mass_set = true;
         } else if (arg == "--bike" && i + 1 < argc) {

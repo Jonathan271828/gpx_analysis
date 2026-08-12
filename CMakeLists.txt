@@ -37,6 +37,8 @@ add_executable(gpx_reader
     src/splits.cpp
     src/cp_model.cpp
     src/trends.cpp
+    src/peaks.cpp
+    src/quadrant.cpp
 )
 
 target_link_libraries(gpx_reader PRIVATE

@@ -237,6 +237,9 @@ void print_training_load(const metrics::TrainingLoad& t) {
     std::cout << "  Variability    : " << std::setprecision(2) << t.vi << "\n";
     std::cout << "  Work / energy  : " << std::setprecision(0) << t.kj << " kJ (~"
               << t.kcal << " kcal)\n";
+    if (t.has_hr)
+        std::cout << "  Efficiency (EF): " << std::setprecision(2) << t.ef
+                  << " (NP/avg HR " << std::setprecision(0) << t.avg_hr << " bpm)\n";
     std::cout << "  Moving time    : " << format_duration(t.moving_s) << "\n\n";
 }
 
@@ -323,6 +326,66 @@ void print_cp(const cp::CpFit& f) {
               << "  W' (anaerobic) : " << std::setprecision(0) << f.w_prime_j << " J ("
               << std::setprecision(1) << f.w_prime_j / 1000.0 << " kJ)\n"
               << "  Fit efforts    : " << f.n_points << " (2-20 min)\n\n";
+}
+
+// ---------------------------------------------------------------------------
+// Print the W'-match summary
+// ---------------------------------------------------------------------------
+
+void print_matches(const cp::MatchStats& m) {
+    if (!m.valid) return;
+    std::cout << "=== Anaerobic reserve (W' matches) ===\n" << std::fixed
+              << "  Matches burned : " << m.matches
+              << "  (deep W' expenditures)\n"
+              << "  Lowest W'bal   : " << std::setprecision(0) << m.min_j << " J ("
+              << std::setprecision(0) << m.min_pct << " %)\n"
+              << "  W'bal at end   : " << std::setprecision(0) << m.end_j << " J ("
+              << std::setprecision(0) << m.end_pct << " %)\n\n";
+}
+
+// ---------------------------------------------------------------------------
+// Print the peak-power efforts table
+// ---------------------------------------------------------------------------
+
+void print_peaks(const std::vector<peaks::PeakEffort>& pk) {
+    if (pk.empty()) return;
+    std::cout << "=== Peak power efforts"
+              << (pk.front().measured ? " (measured)" : " (estimated)") << " ===\n"
+              << std::fixed
+              << "  " << std::setw(9) << "Duration"
+              << "  " << std::setw(7) << "Power"
+              << "  " << "Starting at\n";
+    for (const peaks::PeakEffort& e : pk) {
+        std::cout << "  " << std::setw(9) << format_duration(e.duration_s)
+                  << "  " << std::setprecision(0) << std::setw(5) << e.avg_power_w << " W"
+                  << "  " << format_duration(e.start_offset_s) << " (" << e.start_time << ")\n";
+    }
+    std::cout << "\n";
+}
+
+// ---------------------------------------------------------------------------
+// Print the quadrant analysis (force vs cadence)
+// ---------------------------------------------------------------------------
+
+void print_quadrant(const quadrant::Quadrants& q) {
+    if (!q.valid) return;
+    const char* labels[4] = {
+        "Q1 high force / high cadence",
+        "Q2 high force / low cadence ",
+        "Q3 low force  / low cadence ",
+        "Q4 low force  / high cadence"};
+    std::cout << "=== Quadrant analysis ===\n" << std::fixed
+              << "  Crosshair      : " << std::setprecision(0) << q.aepf_threshold_n
+              << " N, " << std::setprecision(2) << q.cpv_threshold_ms << " m/s"
+              << " (FTP @ 90 rpm); avg cadence " << std::setprecision(0)
+              << q.avg_cadence_rpm << " rpm\n";
+    for (int k = 0; k < 4; ++k) {
+        const Real pct = q.total_s > 0.0 ? 100.0 * q.seconds[k] / q.total_s : 0.0;
+        std::cout << "  " << labels[k]
+                  << "  " << std::setw(9) << format_duration(static_cast<Long>(q.seconds[k]))
+                  << "  " << std::setprecision(1) << std::setw(5) << pct << " %\n";
+    }
+    std::cout << "\n";
 }
 
 // ---------------------------------------------------------------------------

@@ -33,6 +33,7 @@ struct Options {
     Real        body_mass_kg = 71.3;        // --weight/--rider body weight for W/kg
     Real        lthr         = 0.0;         // --lthr  lactate-threshold HR (bpm); 0 = unset
     Real        max_hr       = 0.0;         // --max-hr maximum HR (bpm); 0 = unset
+    Real        crank_length_m = 0.1725;    // --crank crank-arm length (m) for quadrant analysis
 
     std::string power_csv;                  // --power-csv
     std::string xy_path;                    // --xy

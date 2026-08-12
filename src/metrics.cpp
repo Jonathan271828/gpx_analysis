@@ -93,6 +93,22 @@ TrainingLoad training_load(const Track& track, const PowerAnalysis& pa,
         m.avg_wkg = avg / body_mass_kg;
         m.np_wkg  = np  / body_mass_kg;
     }
+
+    // Efficiency Factor = NP / average heart rate over moving time.
+    const auto& pts = track.points;
+    double hr_sum = 0.0, hr_w = 0.0;
+    for (Size i = 1; i < pts.size(); ++i) {
+        if (pa.t_offset_s[i] < 0 || pa.t_offset_s[i - 1] < 0) continue;
+        const Long dt = pa.t_offset_s[i] - pa.t_offset_s[i - 1];
+        if (dt <= 0 || dt > STOP_S || !pts[i].has_hr) continue;
+        hr_sum += static_cast<double>(pts[i].hr) * dt;
+        hr_w   += dt;
+    }
+    if (hr_w > 0.0) {
+        m.has_hr = true;
+        m.avg_hr = static_cast<Real>(hr_sum / hr_w);
+        if (m.avg_hr > 0.0) m.ef = np / m.avg_hr;
+    }
     return m;
 }
 

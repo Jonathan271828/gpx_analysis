@@ -6,6 +6,8 @@
 #include "gpx_reader.hpp"
 #include "io_base.hpp"
 #include "metrics.hpp"
+#include "peaks.hpp"
+#include "quadrant.hpp"
 #include "screen_output.hpp"
 #include "signal.hpp"
 #include "splits.hpp"
@@ -78,6 +80,19 @@ Real analyse_track(GpxReader&                 reader,
     cp::CpFit  cp_fit   = cp::fit(cp_curve);
     io::print_cp(cp_fit);
 
+    // Peak efforts (with timestamps) and quadrant analysis (force vs cadence).
+    static const std::vector<Long> kPeakDurations = {
+        5, 15, 30, 60, 300, 600, 1200, 1800, 3600};
+    io::print_peaks(peaks::best_efforts(track, pa, kPeakDurations));
+    io::print_quadrant(quadrant::analyse(track, pa, opts.ftp_w, opts.crank_length_m));
+
+    // W'-balance series drives both the match summary and the optional export.
+    std::vector<cp::WbalSample> wbal;
+    if (cp_fit.valid) {
+        wbal = cp::wbal_series(track, pa, cp_fit.cp_w, cp_fit.w_prime_j);
+        io::print_matches(cp::count_matches(wbal, cp_fit.w_prime_j));
+    }
+
     // --- File exports ------------------------------------------------------
     if (!opts.power_csv.empty()) {
         const std::string p = outp(opts.power_csv);
@@ -123,7 +138,7 @@ Real analyse_track(GpxReader&                 reader,
         const std::string p = outp(opts.wbal_path);
         if (!cp_fit.valid)
             std::cerr << "W'-balance: no CP fit — skipping " << p << "\n";
-        else if (io::write_wbal_file(p, track, pa, cp_fit.cp_w, cp_fit.w_prime_j))
+        else if (io::write_wbal_file(p, wbal, cp_fit.cp_w, cp_fit.w_prime_j))
             std::cout << "Wrote W'-balance: " << p << "\n\n";
         else
             std::cerr << "Error: could not write W'-balance to " << p << "\n";

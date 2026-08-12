@@ -30,6 +30,9 @@ struct TrainingLoad {
     Real avg_wkg       = 0.0;
     Real np_wkg        = 0.0;
     Long moving_s      = 0;      // moving time used (stops excluded)
+    Bool has_hr        = false;
+    Real avg_hr        = 0.0;    // mean heart rate over moving time
+    Real ef            = 0.0;    // Efficiency Factor = NP / avg HR
 };
 
 /// Compute the training-load summary for a track. `ftp_w` and `body_mass_kg`

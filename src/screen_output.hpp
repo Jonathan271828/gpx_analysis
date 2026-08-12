@@ -5,8 +5,10 @@
 #include "metrics.hpp"      // TrainingLoad, Decoupling
 #include "zones.hpp"        // ZoneTable
 #include "splits.hpp"       // Split
-#include "cp_model.hpp"     // CpFit
+#include "cp_model.hpp"     // CpFit, MatchStats
 #include "trends.hpp"       // TrendPoint
+#include "peaks.hpp"        // PeakEffort
+#include "quadrant.hpp"     // Quadrants
 
 #include <string>
 #include <vector>
@@ -32,6 +34,9 @@ void print_decoupling(const metrics::Decoupling& d);
 void print_zone_table(const zones::ZoneTable& z);
 void print_splits(const std::vector<splits::Split>& sp);
 void print_cp(const cp::CpFit& f);
+void print_matches(const cp::MatchStats& m);
+void print_peaks(const std::vector<peaks::PeakEffort>& pk);
+void print_quadrant(const quadrant::Quadrants& q);
 void print_trends(const std::vector<trends::TrendPoint>& tp);
 
 } // namespace io
