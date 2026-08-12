@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <ctime>
 #include <fstream>
+#include <iostream>
 #include <sstream>
 #include <string>
 
@@ -90,14 +91,16 @@ Bool parse_open_meteo_json(const nlohmann::json& j, WindData& out, std::string& 
 
 } // namespace
 
+namespace wind {
+
 // ---------------------------------------------------------------------------
-// fetch_open_meteo_wind
+// fetch_open_meteo
 // ---------------------------------------------------------------------------
 
-Bool fetch_open_meteo_wind(Real lat, Real lon,
-                           const std::string& start_date,
-                           const std::string& end_date,
-                           WindData& out, std::string& err)
+Bool fetch_open_meteo(Real lat, Real lon,
+                      const std::string& start_date,
+                      const std::string& end_date,
+                      WindData& out, std::string& err)
 {
     std::ostringstream url;
     url << "https://archive-api.open-meteo.com/v1/archive"
@@ -123,10 +126,10 @@ Bool fetch_open_meteo_wind(Real lat, Real lon,
 }
 
 // ---------------------------------------------------------------------------
-// load_wind_json / save_wind_json  (JSON cache in Open-Meteo shape)
+// load_json / save_json  (JSON cache in Open-Meteo shape)
 // ---------------------------------------------------------------------------
 
-Bool load_wind_json(const std::string& path, WindData& out, std::string& err) {
+Bool load_json(const std::string& path, WindData& out, std::string& err) {
     std::ifstream in(path);
     if (!in) { err = "cannot open " + path; return false; }
 
@@ -140,7 +143,7 @@ Bool load_wind_json(const std::string& path, WindData& out, std::string& err) {
     return parse_open_meteo_json(j, out, err);
 }
 
-Bool save_wind_json(const std::string& path, const WindData& in, std::string& err) {
+Bool save_json(const std::string& path, const WindData& in, std::string& err) {
     nlohmann::json j;
     j["hourly"]["time"]               = nlohmann::json::array();
     j["hourly"]["wind_speed_10m"]     = nlohmann::json::array();
@@ -162,3 +165,65 @@ Bool save_wind_json(const std::string& path, const WindData& in, std::string& er
     out << j.dump(2) << "\n";
     return true;
 }
+
+// ---------------------------------------------------------------------------
+// obtain — per-track wind acquisition (fetch / cache / file), with logging
+// ---------------------------------------------------------------------------
+
+WindData obtain(Mode mode, const std::string& path, const Track& track,
+                Size track_index, Size ntracks)
+{
+    WindData wind;
+    if (mode == Mode::Off) return wind;
+
+    const auto& pts = track.points;
+    if (pts.size() < 2 || pts.front().time.size() < 10 || pts.back().time.size() < 10) {
+        std::cerr << "Wind: track has no usable coordinates/timestamps — skipping.\n";
+        return wind;
+    }
+
+    // Request location = track centroid (ERA5's ~25 km grid makes finer pointless)
+    Real lat_sum = 0.0, lon_sum = 0.0;
+    for (const auto& p : pts) { lat_sum += p.lat; lon_sum += p.lon; }
+    const Real lat = lat_sum / static_cast<Real>(pts.size());
+    const Real lon = lon_sum / static_cast<Real>(pts.size());
+    const std::string start_date = pts.front().time.substr(0, 10);
+    const std::string end_date   = pts.back().time.substr(0, 10);
+
+    // Per-track cache/file path (suffix with index when more than one track)
+    const std::string p = (!path.empty() && ntracks > 1)
+                        ? path + "." + std::to_string(track_index)
+                        : path;
+
+    std::string err;
+
+    if (mode == Mode::File) {
+        if (!load_json(p, wind, err))
+            std::cerr << "Wind: could not load " << p << " (" << err << ") — no wind applied.\n";
+        return wind;
+    }
+
+    if (mode == Mode::Cache && load_json(p, wind, err)) {
+        std::cout << "Wind: loaded from cache " << p << "\n";
+        return wind;
+    }
+
+    // Fetch from Open-Meteo (Fetch mode, or Cache miss)
+    std::cout << "Wind: fetching from Open-Meteo (" << start_date
+              << " .. " << end_date << ")...\n";
+    if (!fetch_open_meteo(lat, lon, start_date, end_date, wind, err)) {
+        std::cerr << "Wind: fetch failed (" << err << ") — no wind applied.\n";
+        wind.valid = false;
+        return wind;
+    }
+    if (mode == Mode::Cache) {
+        std::string save_err;
+        if (save_json(p, wind, save_err))
+            std::cout << "Wind: cached to " << p << "\n";
+        else
+            std::cerr << "Wind: could not write cache " << p << " (" << save_err << ")\n";
+    }
+    return wind;
+}
+
+} // namespace wind

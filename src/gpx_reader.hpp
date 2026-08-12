@@ -79,6 +79,10 @@ struct Hill {
     std::string end_time;
     Real      avg_power_w   = 0.0;   // mean estimated power over the climb (W)
     Bool        has_power     = false; // true once attach_climb_power() fills it
+    Long        duration_s    = 0;     // climb duration (s); 0 if timestamps unknown
+    Real        vam_mh        = 0.0;   // vertical ascent metres per hour
+    Real        climb_score   = 0.0;   // distance_m * avg_grade_pct (Strava-style)
+    std::string category;              // "HC", "1".."4", or "" if below Cat 4
 };
 
 // ---------------------------------------------------------------------------

@@ -518,6 +518,24 @@ std::vector<Hill> GpxReader::detect_hills(Size track_index) const
         h.avg_grade_pct = (gain / dist) * 100.0;
         h.start_time    = pts[hill_start].time;
         h.end_time      = pts[end_idx].time;
+
+        // Duration and VAM (vertical ascent metres/hour) from the timestamps.
+        const std::time_t t0 = parse_iso8601(pts[hill_start].time);
+        const std::time_t t1 = parse_iso8601(pts[end_idx].time);
+        if (t0 != -1 && t1 != -1 && t1 > t0) {
+            h.duration_s = static_cast<Long>(t1 - t0);
+            h.vam_mh     = gain / (static_cast<Real>(h.duration_s) / 3600.0);
+        }
+
+        // Strava-style climb score = length(m) * average grade(%), and the
+        // resulting HC/1..4 category (below Cat 4 stays uncategorised).
+        h.climb_score = dist * h.avg_grade_pct;
+        if      (h.climb_score >= 80000.0) h.category = "HC";
+        else if (h.climb_score >= 64000.0) h.category = "1";
+        else if (h.climb_score >= 32000.0) h.category = "2";
+        else if (h.climb_score >= 16000.0) h.category = "3";
+        else if (h.climb_score >=  8000.0) h.category = "4";
+
         hills.push_back(h);
     };
 

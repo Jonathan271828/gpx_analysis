@@ -182,10 +182,10 @@ Bool write_power_hist_file(const std::string&    path,
 // rectangular and loads cleanly in gnuplot/numpy.
 // ---------------------------------------------------------------------------
 
-Bool write_spectral_file(const std::string&    path,
-                         const std::string&    channel,
-                         const std::string&    unit,
-                         const SpectralResult& sr)
+Bool write_spectral_file(const std::string&            path,
+                         const std::string&            channel,
+                         const std::string&            unit,
+                         const signal::SpectralResult& sr)
 {
     std::ofstream out(path);
     if (!out) return false;
@@ -201,6 +201,47 @@ Bool write_spectral_file(const std::string&    path,
     for (Size i = 0; i < rows; ++i) {
         out << sr.lag_s[i] << ' ' << sr.acf[i] << ' '
             << sr.freq_hz[i] << ' ' << sr.psd[i] << '\n';
+    }
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// Write the W'-balance time series (Skiba–Clarke integral model)
+//
+// Above CP the reserve depletes at (P - CP); below CP it refills toward W' in
+// proportion to the current deficit. A dip toward zero marks a deep effort.
+// ---------------------------------------------------------------------------
+
+Bool write_wbal_file(const std::string&   path,
+                     const Track&          track,
+                     const PowerAnalysis&  pa,
+                     Real                  cp_w,
+                     Real                  w_prime_j)
+{
+    if (cp_w <= 0.0 || w_prime_j <= 0.0) return false;
+    std::ofstream out(path);
+    if (!out) return false;
+
+    const auto& pts = track.points;
+    const Size  n   = pts.size();
+
+    out << "# GPXAna W'-balance (Skiba-Clarke), CP=" << std::fixed
+        << std::setprecision(0) << cp_w << " W, W'=" << w_prime_j << " J\n";
+    out << "# 1:elapsed_s 2:wbal_j 3:power_w\n";
+    out << std::fixed << std::setprecision(1);
+
+    Real wbal = w_prime_j;
+    for (Size i = 1; i < n; ++i) {
+        if (pa.t_offset_s[i] < 0 || pa.t_offset_s[i - 1] < 0) continue;
+        const Long dt = pa.t_offset_s[i] - pa.t_offset_s[i - 1];
+        if (dt <= 0 || dt > 20) continue;                 // gap / stop
+        const Real p = pa.point_power_w[i];
+        if (p > cp_w)
+            wbal -= (p - cp_w) * static_cast<Real>(dt);
+        else
+            wbal += (cp_w - p) * (w_prime_j - wbal) / w_prime_j * static_cast<Real>(dt);
+        if (wbal > w_prime_j) wbal = w_prime_j;           // cap at full reserve
+        out << pa.t_offset_s[i] << ' ' << wbal << ' ' << p << '\n';
     }
     return true;
 }

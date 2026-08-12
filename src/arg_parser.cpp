@@ -11,14 +11,20 @@ namespace arg_parser {
 // ---------------------------------------------------------------------------
 
 void print_usage(const Char* prog, std::ostream& os) {
-    os << "Usage: " << prog << " <file.gpx> [options]\n\n"
+    os << "Usage: " << prog << " <file.gpx> [more.gpx ...] [options]\n\n"
        << "Options:\n"
        << "  --points N       print first N track points (default: 10)\n"
        << "  --dist  D        find fastest segment of D km  (e.g. --dist 5.0)\n"
        << "  --time  T        find fastest segment of T seconds (e.g. --time 300)\n"
+       << "\nRider profile (training metrics):\n"
+       << "  --ftp F          functional threshold power in W (default: 305)\n"
+       << "  --weight W       body weight in kg for W/kg (default: 71.3; alias --rider)\n"
+       << "  --lthr H         lactate-threshold heart rate in bpm (enables HR zones)\n"
+       << "  --max-hr H       maximum heart rate in bpm (HR-zone fallback if no --lthr)\n"
+       << "  --splits D       per-D-km split table (e.g. --splits 1.0)\n"
        << "\nPower estimation (Strava-style physics model, runs by default):\n"
        << "  --mass  M        total rider+bike mass in kg (default: 80)\n"
-       << "  --rider R        rider mass in kg (summed with --bike if --mass unset)\n"
+       << "  --rider R        rider/body mass in kg (also W/kg; summed with --bike if --mass unset)\n"
        << "  --bike  B        bike mass in kg (summed with --rider if --mass unset)\n"
        << "  --crr   C        rolling resistance coefficient (default: 0.005)\n"
        << "  --cda   A        aerodynamic drag area CdA in m^2 (default: 0.32)\n"
@@ -33,6 +39,7 @@ void print_usage(const Char* prog, std::ostream& os) {
        << "  --power-curve F  write mean-maximal power curve (duration vs W) to F\n"
        << "  --power-hist F   write power histogram (time in each power band) to F\n"
        << "  --hist-bin W     histogram bin width in watts (default: 25)\n"
+       << "  --wbal-file F    write the W'-balance time series to F (needs a CP fit)\n"
        << "\nAutocorrelation & power spectrum (4-col: lag, acf, freq, psd):\n"
        << "  --acf-velocity F       velocity autocorrelation + spectrum -> F\n"
        << "  --acf-power F          estimated power                     -> F\n"
@@ -44,7 +51,8 @@ void print_usage(const Char* prog, std::ostream& os) {
        << "  --wind           fetch historical wind and apply it\n"
        << "  --wind-cache F   like --wind, but cache to/read from file F\n"
        << "  --wind-file F    apply wind from local JSON file F (offline)\n"
-       << "\nMultiple --dist and --time flags are supported.\n";
+       << "\nMultiple --dist and --time flags are supported. Passing several .gpx\n"
+       << "files adds a CTL/ATL/TSB training-trend table across them.\n";
 }
 
 // ---------------------------------------------------------------------------
@@ -53,29 +61,37 @@ void print_usage(const Char* prog, std::ostream& os) {
 
 Bool parse(Int argc, Char* argv[], Options& opts, std::string& error) {
     error.clear();
-    if (argc < 2) return false;             // no input file → caller shows usage
-
-    opts.filepath = argv[1];
+    if (argc < 2) return false;             // no arguments → caller shows usage
 
     // Mass is optional (default rider+bike = 80 kg). Collect the pieces locally
-    // and resolve the total after the loop.
-    Real rider_kg   = 71.0;
+    // and resolve the total after the loop. rider_kg doubles as body weight.
+    Real rider_kg   = 71.3;
     Real bike_kg    = 9.0;
     Bool mass_set   = false;
     Real mass_total = 80.0;
 
-    for (Int i = 2; i < argc; ++i) {
+    for (Int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
-        if (arg == "--points" && i + 1 < argc) {
+        if (arg.rfind("--", 0) != 0) {          // not a flag → positional .gpx file
+            opts.filepaths.push_back(arg);
+        } else if (arg == "--points" && i + 1 < argc) {
             opts.max_print = static_cast<Size>(std::atoi(argv[++i]));
         } else if (arg == "--dist" && i + 1 < argc) {
             opts.dist_windows.push_back(std::atof(argv[++i]));
         } else if (arg == "--time" && i + 1 < argc) {
             opts.time_windows.push_back(static_cast<Long>(std::atol(argv[++i])));
+        } else if (arg == "--ftp" && i + 1 < argc) {
+            opts.ftp_w = std::atof(argv[++i]);
+        } else if ((arg == "--weight" || arg == "--rider") && i + 1 < argc) {
+            rider_kg = std::atof(argv[++i]);     // body weight; also feeds mass sum
+        } else if (arg == "--lthr" && i + 1 < argc) {
+            opts.lthr = std::atof(argv[++i]);
+        } else if (arg == "--max-hr" && i + 1 < argc) {
+            opts.max_hr = std::atof(argv[++i]);
+        } else if (arg == "--splits" && i + 1 < argc) {
+            opts.split_km = std::atof(argv[++i]);
         } else if (arg == "--mass" && i + 1 < argc) {
             mass_total = std::atof(argv[++i]); mass_set = true;
-        } else if (arg == "--rider" && i + 1 < argc) {
-            rider_kg = std::atof(argv[++i]);
         } else if (arg == "--bike" && i + 1 < argc) {
             bike_kg = std::atof(argv[++i]);
         } else if (arg == "--crr" && i + 1 < argc) {
@@ -104,6 +120,8 @@ Bool parse(Int argc, Char* argv[], Options& opts, std::string& error) {
             opts.power_hist_path = argv[++i];
         } else if (arg == "--hist-bin" && i + 1 < argc) {
             opts.hist_bin_w = std::atof(argv[++i]);
+        } else if (arg == "--wbal-file" && i + 1 < argc) {
+            opts.wbal_path = argv[++i];
         } else if (arg == "--acf-velocity" && i + 1 < argc) {
             opts.acf_velocity = argv[++i];
         } else if (arg == "--acf-power" && i + 1 < argc) {
@@ -117,18 +135,22 @@ Bool parse(Int argc, Char* argv[], Options& opts, std::string& error) {
         } else if (arg == "--acf-dt" && i + 1 < argc) {
             opts.acf_dt = std::atof(argv[++i]);
         } else if (arg == "--wind") {
-            opts.wind_mode = WindMode::Fetch;
+            opts.wind_mode = wind::Mode::Fetch;
         } else if (arg == "--wind-cache" && i + 1 < argc) {
-            opts.wind_mode = WindMode::Cache; opts.wind_path = argv[++i];
+            opts.wind_mode = wind::Mode::Cache; opts.wind_path = argv[++i];
         } else if (arg == "--wind-file" && i + 1 < argc) {
-            opts.wind_mode = WindMode::File; opts.wind_path = argv[++i];
+            opts.wind_mode = wind::Mode::File; opts.wind_path = argv[++i];
         } else {
             error = "Unknown option: " + arg;
             return false;
         }
     }
 
-    // --mass sets the total directly; otherwise sum rider + bike (default 80 kg).
+    if (opts.filepaths.empty()) return false;   // no input file → caller shows usage
+
+    // Body weight (for W/kg) is the rider mass; the physics total is either the
+    // explicit --mass or rider + bike.
+    opts.body_mass_kg        = rider_kg;
     opts.power.total_mass_kg = mass_set ? mass_total : (rider_kg + bike_kg);
     return true;
 }

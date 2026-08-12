@@ -21,6 +21,8 @@
 // below are padded to a common length so the result writes as a rectangular
 // 4-column table; entries past a column's meaningful range are NaN.
 
+namespace signal {
+
 struct SpectralResult {
     Bool                valid     = false;
     Real              dt_s      = 0.0;  // uniform grid spacing actually used (s)
@@ -43,3 +45,5 @@ struct SpectralResult {
 SpectralResult compute_acf_psd(const std::vector<Real>& t_s,
                                const std::vector<Real>& values,
                                Real dt_s = 0.0);
+
+} // namespace signal

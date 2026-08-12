@@ -19,6 +19,14 @@ time window.
 - Fastest segment finder: sliding-window search by distance or time
 - Autocorrelation function and power spectrum of each time-dependent channel
   (velocity, power, heart rate, cadence), exported as 4-column text files
+- Training metrics: Normalized Power, Intensity Factor, TSS, Variability Index,
+  energy (kJ/kcal) and watts-per-kilo
+- Power and heart-rate training-zone distributions (time in zone)
+- Aerobic decoupling (Pw:Hr) — a durability/fatigue indicator
+- Per-distance split table (pace, power, HR, climbing per split)
+- Climb VAM and Strava-style HC/1–4 categorisation in the hills table
+- Critical-power model (CP and W') with an optional W'-balance export
+- Multi-ride training trend (CTL / ATL / TSB) when several files are given
 - Multiple `--dist` and `--time` queries supported in a single run
 
 ## Requirements
@@ -44,16 +52,23 @@ The binary is placed at `build/gpx_reader`.
 ## Usage
 
 ```
-./build/gpx_reader <file.gpx> [options]
+./build/gpx_reader <file.gpx> [more.gpx ...] [options]
 
 Options:
   --points N       print first N track points (default: 10, use 0 to suppress)
   --dist  D        find fastest segment of D km    (e.g. --dist 5.0)
   --time  T        find fastest segment of T s     (e.g. --time 300)
 
+Rider profile (training metrics):
+  --ftp F          functional threshold power in W (default: 305)
+  --weight W       body weight in kg for W/kg (default: 71.3; alias --rider)
+  --lthr H         lactate-threshold HR in bpm (enables HR zones)
+  --max-hr H       maximum HR in bpm (HR-zone fallback if no --lthr)
+  --splits D       per-D-km split table (e.g. --splits 1.0)
+
 Power estimation (runs by default):
   --mass  M        total rider+bike mass in kg (default: 80)
-  --rider R        rider mass in kg (summed with --bike if --mass unset)
+  --rider R        rider/body mass in kg (also W/kg; summed with --bike if --mass unset)
   --bike  B        bike mass in kg  (summed with --rider if --mass unset)
   --crr   C        rolling resistance coefficient (default: 0.005)
   --cda   A        aerodynamic drag area CdA in m^2 (default: 0.32)
@@ -68,6 +83,7 @@ Power estimation (runs by default):
   --power-curve F  write mean-maximal power curve (duration vs W) to F
   --power-hist F   write power histogram (time in each power band) to F
   --hist-bin W     histogram bin width in watts (default: 25)
+  --wbal-file F    write the W'-balance time series to F (needs a CP fit)
 
 Autocorrelation & power spectrum (4-col: lag, acf, freq, psd):
   --acf-velocity F       velocity autocorrelation + spectrum -> F
@@ -490,6 +506,75 @@ not because the data is bad*.
   at large lags (standard biased estimator). Read the *shape* and *peak
   locations*, not the absolute values of the far tail.
 
+## Training analysis
+
+These run by default from the estimated power (or the measured `<power>` when the
+track carries it), using the rider profile flags — FTP (`--ftp`, default 305 W)
+and body weight (`--weight`/`--rider`, default 71.3 kg).
+
+### Training load
+
+- **Normalized Power (NP)** — 30 s rolling average of power, then the fourth
+  root of the mean fourth power; the effort "felt" harder than the plain average
+  because surges cost disproportionately.
+- **Intensity Factor (IF)** = NP / FTP — how hard relative to threshold.
+- **Training Stress Score (TSS)** = duration × NP × IF / (FTP × 3600) × 100 — the
+  ride's overall training load (≈100 = one hour all-out at threshold).
+- **Variability Index (VI)** = NP / average power — pacing smoothness (≈1.0 steady,
+  higher = surgy).
+- **Energy** in kJ and (≈ equal) kcal, and **watts-per-kilo** for average and NP.
+
+Moving time excludes stops (steps longer than 20 s are dropped).
+
+### Zones
+
+Time spent in each **power zone** (Coggan 7-zone model as % of FTP) and, when
+`--lthr` or `--max-hr` is given, each **heart-rate zone** (5-zone, % of LTHR or
+max HR). Shows at a glance whether the ride was recovery, endurance, tempo or
+threshold work.
+
+### Aerobic decoupling (Pw:Hr)
+
+Splits the moving time in half and compares the power-to-heart-rate ratio of each
+half. A decoupling above ~5 % means heart rate drifted up for the same power —
+the classic fingerprint of fatigue, heat or dehydration; below ~5 % indicates
+good aerobic durability. Needs heart-rate data.
+
+### Splits
+
+`--splits D` prints a per-`D`-kilometre table: distance, time, average speed,
+average power, average heart rate and elevation gained — a quick read on pacing.
+
+### Climb VAM and category
+
+The hills table gains **VAM** (vertical ascent metres per hour, the standard
+climbing-performance number) and a Strava-style **category** (HC, 1–4) from the
+climb score `length(m) × average grade(%)`.
+
+### Critical-power model
+
+Fits the two-parameter model `P(t) = W'/t + CP` to the ride's mean-maximal power
+curve over 2–20 minute efforts: **CP** (critical power, ≈ FTP) and **W'** (the
+anaerobic work capacity above CP). `--wbal-file F` writes the W'-balance time
+series (Skiba–Clarke), showing how deep each hard effort dug into that reserve.
+The fit is only as good as the ride's best efforts — on an easy ride CP comes out
+low because nothing near-maximal was done.
+
+### Multi-ride trend (CTL / ATL / TSB)
+
+Passing several `.gpx` files adds a training-trend table across them, from each
+ride's TSS and date:
+
+- **CTL** (Chronic Training Load) — 42-day exponential average of daily TSS =
+  fitness.
+- **ATL** (Acute Training Load) — 7-day exponential average = fatigue.
+- **TSB** (Training Stress Balance) = CTL − ATL = form (negative when fatigued,
+  positive when fresh).
+
+```bash
+./build/gpx_reader rides/*.gpx --points 0
+```
+
 ## GPX format support
 
 The parser reads GPX 1.1 files. The following elements are extracted:
@@ -536,15 +621,17 @@ detection and fastest-segment queries are run independently for each track.
     │                    Hill, BestSegment) and GpxReader class declaration
     ├── gpx_reader.cpp   GPX parsing (pugixml), statistics, hill detection and
     │                    fastest-segment sliding-window algorithms
-    ├── signal.hpp       SpectralResult struct and compute_acf_psd() declaration
-    ├── signal.cpp       Resampling, FFT and Wiener–Khinchin autocorrelation/PSD
-    ├── wind.hpp         WindData helpers (fetch / load / save) declarations
-    ├── wind.cpp         Open-Meteo wind fetch (curl) and JSON cache I/O
-    ├── io_base.hpp      Shared I/O helpers (format_duration) — namespace io
-    ├── io_base.cpp      Shared I/O helper implementations
-    ├── screen_output.hpp  print_* declarations for the stdout report (namespace io)
-    ├── screen_output.cpp  Formatted console output
-    ├── file_output.hpp  write_* declarations for the data-file exports (namespace io)
-    ├── file_output.cpp  CSV / whitespace-table writers
-    └── main.cpp         Program flow (parse → analyse → report); data acquisition helpers
+    ├── signal.hpp/.cpp    Resampling, FFT, Wiener–Khinchin ACF/PSD (namespace signal)
+    ├── channels.hpp/.cpp  Extract per-sample series from a track (namespace channels)
+    ├── metrics.hpp/.cpp   Training load (NP/IF/TSS/VI, energy, W/kg) + decoupling
+    ├── zones.hpp/.cpp     Power and heart-rate time-in-zone distributions
+    ├── splits.hpp/.cpp    Per-distance split table
+    ├── cp_model.hpp/.cpp  Critical-power (CP / W') fit from the power curve
+    ├── trends.hpp/.cpp    Multi-ride CTL / ATL / TSB progression
+    ├── wind.hpp/.cpp      Open-Meteo fetch/cache + per-track obtain() (namespace wind)
+    ├── io_base.hpp/.cpp     Shared I/O helper (format_duration) — namespace io
+    ├── screen_output.hpp/.cpp  print_* — the stdout report (namespace io)
+    ├── file_output.hpp/.cpp    write_* — the data-file exports (namespace io)
+    ├── app.hpp/.cpp     Driver: per-file/per-track analysis loop (namespace app)
+    └── main.cpp         Entry point: parse the command line, call app::run()
 ```

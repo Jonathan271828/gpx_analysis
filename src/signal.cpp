@@ -52,6 +52,8 @@ Size next_pow2(Size x) {
 // compute_acf_psd
 // ---------------------------------------------------------------------------
 
+namespace signal {
+
 SpectralResult compute_acf_psd(const std::vector<Real>& t_s,
                                const std::vector<Real>& values,
                                Real dt_s)
@@ -153,3 +155,5 @@ SpectralResult compute_acf_psd(const std::vector<Real>& t_s,
     R.valid     = true;
     return R;
 }
+
+} // namespace signal

@@ -23,13 +23,20 @@ FetchContent_MakeAvailable(pugixml nlohmann_json)
 
 add_executable(gpx_reader
     src/main.cpp
+    src/app.cpp
     src/arg_parser.cpp
     src/io_base.cpp
     src/screen_output.cpp
     src/file_output.cpp
+    src/channels.cpp
     src/gpx_reader.cpp
     src/wind.cpp
     src/signal.cpp
+    src/metrics.cpp
+    src/zones.cpp
+    src/splits.cpp
+    src/cp_model.cpp
+    src/trends.cpp
 )
 
 target_link_libraries(gpx_reader PRIVATE
