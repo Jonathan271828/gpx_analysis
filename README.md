@@ -540,5 +540,11 @@ detection and fastest-segment queries are run independently for each track.
     ├── signal.cpp       Resampling, FFT and Wiener–Khinchin autocorrelation/PSD
     ├── wind.hpp         WindData helpers (fetch / load / save) declarations
     ├── wind.cpp         Open-Meteo wind fetch (curl) and JSON cache I/O
-    └── main.cpp         Program flow and all formatted console output
+    ├── io_base.hpp      Shared I/O helpers (format_duration) — namespace io
+    ├── io_base.cpp      Shared I/O helper implementations
+    ├── screen_output.hpp  print_* declarations for the stdout report (namespace io)
+    ├── screen_output.cpp  Formatted console output
+    ├── file_output.hpp  write_* declarations for the data-file exports (namespace io)
+    ├── file_output.cpp  CSV / whitespace-table writers
+    └── main.cpp         Program flow (parse → analyse → report); data acquisition helpers
 ```

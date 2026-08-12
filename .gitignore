@@ -3,3 +3,8 @@ build/
 Install/
 Knowledge/
 test/
+
+# editor swap / temp files
+*.swp
+*.swo
+*~
