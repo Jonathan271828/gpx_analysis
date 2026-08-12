@@ -52,6 +52,17 @@ cmake --build build --parallel
 
 The binary is placed at `build/gpx_reader`.
 
+## API documentation
+
+The source is documented with Doxygen comments in the header files. Generate the
+HTML reference with:
+
+```bash
+doxygen Doxyfile      # output in docs/html/index.html
+```
+
+(`docs/` is git-ignored; the README serves as the generated main page.)
+
 ## Usage
 
 ```

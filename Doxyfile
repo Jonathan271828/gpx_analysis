@@ -1,0 +1,30 @@
+# Doxygen configuration for GPXAna.
+# Generate the docs with:  doxygen Doxyfile   (output in docs/html/index.html)
+
+PROJECT_NAME           = "GPXAna"
+PROJECT_BRIEF          = "GPX ride analysis: stats, power, training metrics"
+OUTPUT_DIRECTORY       = docs
+
+# Inputs: the source tree (flat) plus the README as the landing page.
+INPUT                  = src README.md
+FILE_PATTERNS          = *.hpp *.cpp *.md
+RECURSIVE              = NO
+USE_MDFILE_AS_MAINPAGE = README.md
+
+# Extraction: document everything, including file-scope statics in the .cpp files.
+EXTRACT_ALL            = YES
+EXTRACT_STATIC         = YES
+EXTRACT_PRIVATE        = YES
+JAVADOC_AUTOBRIEF      = YES
+OPTIMIZE_OUTPUT_FOR_C  = NO
+MARKDOWN_SUPPORT       = YES
+
+# Output: HTML only, with a source browser; no LaTeX, no external tools required.
+GENERATE_HTML          = YES
+GENERATE_LATEX         = NO
+SOURCE_BROWSER         = YES
+HAVE_DOT               = NO
+
+# Keep the run quiet and free of undocumented-symbol noise.
+QUIET                  = YES
+WARN_IF_UNDOCUMENTED   = NO

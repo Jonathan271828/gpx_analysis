@@ -1,54 +1,66 @@
 #pragma once
 
+/**
+ * @file metrics.hpp
+ * @brief Training-analysis metrics: load (NP/IF/TSS/VI, energy, W/kg,
+ *        Efficiency Factor) and aerobic decoupling.
+ *
+ * Everything is derived from the per-step power series in PowerAnalysis (the
+ * measured `<power>` when the track carries it, otherwise the estimate).
+ */
+
 #include "types.hpp"
 #include "gpx_reader.hpp"   // Track, PowerAnalysis
 
-// ---------------------------------------------------------------------------
-// Training-analysis metrics
-//
-// Load-oriented numbers a rider uses to judge how hard a ride was and how the
-// body responded: Normalized Power, Intensity Factor, Training Stress Score,
-// Variability Index, energy, watts-per-kilo, and aerobic decoupling.
-// Everything is derived from the per-step power series in PowerAnalysis (the
-// measured <power> when the track carries it, otherwise the estimate).
-// ---------------------------------------------------------------------------
-
 namespace metrics {
 
+/** @brief Training-load summary for one track. */
 struct TrainingLoad {
-    Bool valid         = false;
-    Bool from_measured = false;  // true when computed from a real power meter
-    Real avg_power_w   = 0.0;
-    Real np_w          = 0.0;    // Normalized Power
-    Real if_           = 0.0;    // Intensity Factor = NP / FTP
-    Real tss           = 0.0;    // Training Stress Score
-    Real vi            = 0.0;    // Variability Index = NP / avg power
-    Real ftp_w         = 0.0;
-    Real kj            = 0.0;    // mechanical work
-    Real kcal          = 0.0;    // ~ kj for cycling (see note in .cpp)
-    Real body_mass_kg  = 0.0;
-    Real avg_wkg       = 0.0;
-    Real np_wkg        = 0.0;
-    Long moving_s      = 0;      // moving time used (stops excluded)
-    Bool has_hr        = false;
-    Real avg_hr        = 0.0;    // mean heart rate over moving time
-    Real ef            = 0.0;    // Efficiency Factor = NP / avg HR
+    Bool valid         = false;  /**< True when a usable power series was found. */
+    Bool from_measured = false;  /**< True when computed from a real power meter. */
+    Real avg_power_w   = 0.0;    /**< Average power over moving time (W). */
+    Real np_w          = 0.0;    /**< Normalized Power (W). */
+    Real if_           = 0.0;    /**< Intensity Factor = NP / FTP. */
+    Real tss           = 0.0;    /**< Training Stress Score. */
+    Real vi            = 0.0;    /**< Variability Index = NP / average power. */
+    Real ftp_w         = 0.0;    /**< FTP used for IF/TSS (W). */
+    Real kj            = 0.0;    /**< Mechanical work (kJ). */
+    Real kcal          = 0.0;    /**< Energy (kcal); ~ kj for cycling. */
+    Real body_mass_kg  = 0.0;    /**< Rider body mass used for W/kg (kg). */
+    Real avg_wkg       = 0.0;    /**< Average power per kilogram (W/kg). */
+    Real np_wkg        = 0.0;    /**< Normalized Power per kilogram (W/kg). */
+    Long moving_s      = 0;      /**< Moving time used (stops excluded) (s). */
+    Bool has_hr        = false;  /**< True if heart rate was available. */
+    Real avg_hr        = 0.0;    /**< Mean heart rate over moving time (bpm). */
+    Real ef            = 0.0;    /**< Efficiency Factor = NP / avg HR. */
 };
 
-/// Compute the training-load summary for a track. `ftp_w` and `body_mass_kg`
-/// come from the CLI. Returns valid == false when there is no usable power.
+/**
+ * @brief Compute the training-load summary for a track.
+ * @param track        The track to analyse.
+ * @param pa           Power analysis (per-step power series + timestamps).
+ * @param ftp_w        Functional threshold power (W).
+ * @param body_mass_kg Rider body mass for W/kg (kg); pass 0 to skip W/kg.
+ * @return Filled TrainingLoad; valid == false when power is unusable.
+ */
 TrainingLoad training_load(const Track& track, const PowerAnalysis& pa,
                            Real ftp_w, Real body_mass_kg);
 
+/** @brief Aerobic decoupling (Pw:Hr): drift of the power-to-heart-rate ratio. */
 struct Decoupling {
-    Bool valid        = false;
-    Real first_ratio  = 0.0;   // (avg power / avg HR) over the first moving half
-    Real second_ratio = 0.0;   // ... and the second half
-    Real pct          = 0.0;   // (first - second)/first * 100; + = HR drifted up
+    Bool valid        = false; /**< True if heart rate was available in both halves. */
+    Real first_ratio  = 0.0;   /**< (avg power / avg HR) over the first moving half. */
+    Real second_ratio = 0.0;   /**< ... over the second half. */
+    Real pct          = 0.0;   /**< (first - second)/first * 100; + = HR drifted up. */
 };
 
-/// Aerobic decoupling (Pw:Hr): how much the power-to-heart-rate ratio drifted
-/// from the first half of the ride to the second. Needs heart-rate data.
+/**
+ * @brief Compute aerobic decoupling by comparing the first and second moving
+ *        halves of the ride.
+ * @param track The track to analyse.
+ * @param pa    Power analysis for the same track.
+ * @return Filled Decoupling; valid == false without heart-rate data.
+ */
 Decoupling decoupling(const Track& track, const PowerAnalysis& pa);
 
 } // namespace metrics
