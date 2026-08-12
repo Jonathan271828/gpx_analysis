@@ -1,4 +1,4 @@
-#include "gpx_reader.h"
+#include "gpx_reader.hpp"
 
 #include <pugixml.hpp>
 #include <algorithm>
@@ -17,16 +17,16 @@
 namespace {
 
 /// Haversine distance between two WGS-84 points, result in metres.
-double haversine(double lat1, double lon1, double lat2, double lon2) {
-    constexpr double R = 6'371'000.0; // Earth radius in metres
-    constexpr double DEG2RAD = M_PI / 180.0;
+Real haversine(Real lat1, Real lon1, Real lat2, Real lon2) {
+    constexpr Real R = 6'371'000.0; // Earth radius in metres
+    constexpr Real DEG2RAD = M_PI / 180.0;
 
-    const double phi1 = lat1 * DEG2RAD;
-    const double phi2 = lat2 * DEG2RAD;
-    const double dphi = (lat2 - lat1) * DEG2RAD;
-    const double dlam = (lon2 - lon1) * DEG2RAD;
+    const Real phi1 = lat1 * DEG2RAD;
+    const Real phi2 = lat2 * DEG2RAD;
+    const Real dphi = (lat2 - lat1) * DEG2RAD;
+    const Real dlam = (lon2 - lon1) * DEG2RAD;
 
-    const double a = std::sin(dphi / 2) * std::sin(dphi / 2)
+    const Real a = std::sin(dphi / 2) * std::sin(dphi / 2)
                    + std::cos(phi1) * std::cos(phi2)
                    * std::sin(dlam / 2) * std::sin(dlam / 2);
 
@@ -35,16 +35,16 @@ double haversine(double lat1, double lon1, double lat2, double lon2) {
 
 /// Local name of an XML element, i.e. the part after any namespace prefix.
 /// pugixml keeps the prefix in the node name ("ns3:hr"), so "ns3:hr" -> "hr".
-std::string local_name(const char* qualified) {
+std::string local_name(const Char* qualified) {
     std::string s = qualified ? qualified : "";
-    const std::size_t colon = s.rfind(':');
+    const Size colon = s.rfind(':');
     return (colon == std::string::npos) ? s : s.substr(colon + 1);
 }
 
 /// Case-insensitive ASCII string compare.
-bool iequals(const std::string& a, const std::string& b) {
+Bool iequals(const std::string& a, const std::string& b) {
     if (a.size() != b.size()) return false;
-    for (std::size_t i = 0; i < a.size(); ++i)
+    for (Size i = 0; i < a.size(); ++i)
         if (std::tolower(static_cast<unsigned char>(a[i])) !=
             std::tolower(static_cast<unsigned char>(b[i])))
             return false;
@@ -65,10 +65,10 @@ pugi::xml_node child_by_local_name(const pugi::xml_node& parent,
 
 /// Parse an ISO-8601 timestamp string ("2026-03-31T09:46:45.000Z") to time_t.
 /// Returns -1 on failure.
-std::time_t parse_iso8601(const std::string& s) {
+Time parse_iso8601(const std::string& s) {
     std::tm tm{};
     // strptime handles "2026-03-31T09:46:45" — ignore fractional seconds and Z
-    const char* p = strptime(s.c_str(), "%Y-%m-%dT%H:%M:%S", &tm);
+    const Char* p = strptime(s.c_str(), "%Y-%m-%dT%H:%M:%S", &tm);
     if (!p) return -1;
     tm.tm_isdst = 0;
     // timegm interprets as UTC (available on Linux/glibc)
@@ -81,7 +81,7 @@ std::time_t parse_iso8601(const std::string& s) {
 // GpxReader::parse
 // ---------------------------------------------------------------------------
 
-bool GpxReader::parse(const std::string& filepath) {
+Bool GpxReader::parse(const std::string& filepath) {
     pugi::xml_document doc;
     pugi::xml_parse_result result = doc.load_file(filepath.c_str());
 
@@ -136,9 +136,9 @@ bool GpxReader::parse(const std::string& filepath) {
 
                     // Look a field up in the wrapper first, then directly under
                     // <extensions> — accepting any of the given name aliases.
-                    auto find_field = [&](std::initializer_list<const char*> names)
+                    auto find_field = [&](std::initializer_list<const Char*> names)
                         -> pugi::xml_node {
-                        for (const char* nm : names) {
+                        for (const Char* nm : names) {
                             pugi::xml_node n = child_by_local_name(sensors, nm);
                             if (!n && tpe) n = child_by_local_name(ext, nm);
                             if (n) return n;
@@ -184,7 +184,7 @@ bool GpxReader::parse(const std::string& filepath) {
 // GpxReader::compute_stats
 // ---------------------------------------------------------------------------
 
-TrackStats GpxReader::compute_stats(std::size_t track_index) const {
+TrackStats GpxReader::compute_stats(Size track_index) const {
     TrackStats stats;
 
     if (track_index >= data_.tracks.size()) return stats;
@@ -198,22 +198,22 @@ TrackStats GpxReader::compute_stats(std::size_t track_index) const {
     stats.min_ele_m = pts.front().ele;
     stats.max_ele_m = pts.front().ele;
 
-    double atemp_sum   = 0.0;
-    std::size_t atemp_count = 0;
+    Real atemp_sum   = 0.0;
+    Size atemp_count = 0;
 
-    long        hr_sum    = 0;  int hr_min    = 0;  int hr_max    = 0;
-    std::size_t hr_count  = 0;
-    long        cad_sum   = 0;  int cad_min   = 0;  int cad_max   = 0;
-    std::size_t cad_count = 0;
-    long        power_sum = 0;  int power_min = 0;  int power_max = 0;
-    std::size_t power_count = 0;
+    Long        hr_sum    = 0;  Int hr_min    = 0;  Int hr_max    = 0;
+    Size hr_count  = 0;
+    Long        cad_sum   = 0;  Int cad_min   = 0;  Int cad_max   = 0;
+    Size cad_count = 0;
+    Long        power_sum = 0;  Int power_min = 0;  Int power_max = 0;
+    Size power_count = 0;
 
-    double climb_grade_sum  = 0.0;
-    double descent_grade_sum = 0.0;
-    std::size_t climb_count  = 0;
-    std::size_t descent_count = 0;
+    Real climb_grade_sum  = 0.0;
+    Real descent_grade_sum = 0.0;
+    Size climb_count  = 0;
+    Size descent_count = 0;
 
-    for (std::size_t i = 0; i < pts.size(); ++i) {
+    for (Size i = 0; i < pts.size(); ++i) {
         const auto& p = pts[i];
 
         // Elevation extremes
@@ -250,17 +250,17 @@ TrackStats GpxReader::compute_stats(std::size_t track_index) const {
             const auto& prev = pts[i - 1];
 
             // Distance (Haversine, horizontal)
-            const double horiz_dist = haversine(prev.lat, prev.lon, p.lat, p.lon);
+            const Real horiz_dist = haversine(prev.lat, prev.lon, p.lat, p.lon);
             stats.total_distance_m += horiz_dist;
 
             // Elevation gain/loss
-            const double delta = p.ele - prev.ele;
+            const Real delta = p.ele - prev.ele;
             if (delta > 0.0) stats.elevation_gain_m += delta;
             else             stats.elevation_loss_m += -delta;
 
             // Gradient — only for steps with meaningful horizontal distance
             if (horiz_dist >= 1.0) {
-                const double grade = (delta / horiz_dist) * 100.0;
+                const Real grade = (delta / horiz_dist) * 100.0;
                 if (delta > 0.0) {
                     climb_grade_sum += grade;
                     ++climb_count;
@@ -273,10 +273,10 @@ TrackStats GpxReader::compute_stats(std::size_t track_index) const {
     }
 
     // Duration
-    std::time_t t_start = parse_iso8601(pts.front().time);
-    std::time_t t_end   = parse_iso8601(pts.back().time);
+    Time t_start = parse_iso8601(pts.front().time);
+    Time t_end   = parse_iso8601(pts.back().time);
     if (t_start != -1 && t_end != -1 && t_end >= t_start) {
-        stats.duration_s = static_cast<long>(t_end - t_start);
+        stats.duration_s = static_cast<Long>(t_end - t_start);
     }
 
     // Average speed (km/h)
@@ -287,25 +287,25 @@ TrackStats GpxReader::compute_stats(std::size_t track_index) const {
 
     // Average temperature
     if (atemp_count > 0) {
-        stats.avg_atemp = atemp_sum / static_cast<double>(atemp_count);
+        stats.avg_atemp = atemp_sum / static_cast<Real>(atemp_count);
         stats.has_atemp = true;
     }
 
     // Sensor averages / extremes
     if (hr_count > 0) {
-        stats.avg_hr = static_cast<double>(hr_sum) / static_cast<double>(hr_count);
+        stats.avg_hr = static_cast<Real>(hr_sum) / static_cast<Real>(hr_count);
         stats.min_hr = hr_min;
         stats.max_hr = hr_max;
         stats.has_hr = true;
     }
     if (cad_count > 0) {
-        stats.avg_cad = static_cast<double>(cad_sum) / static_cast<double>(cad_count);
+        stats.avg_cad = static_cast<Real>(cad_sum) / static_cast<Real>(cad_count);
         stats.min_cad = cad_min;
         stats.max_cad = cad_max;
         stats.has_cad = true;
     }
     if (power_count > 0) {
-        stats.avg_power = static_cast<double>(power_sum) / static_cast<double>(power_count);
+        stats.avg_power = static_cast<Real>(power_sum) / static_cast<Real>(power_count);
         stats.min_power = power_min;
         stats.max_power = power_max;
         stats.has_power = true;
@@ -313,9 +313,9 @@ TrackStats GpxReader::compute_stats(std::size_t track_index) const {
 
     // Average climb / descent gradient
     if (climb_count > 0)
-        stats.avg_climb_pct = climb_grade_sum / static_cast<double>(climb_count);
+        stats.avg_climb_pct = climb_grade_sum / static_cast<Real>(climb_count);
     if (descent_count > 0)
-        stats.avg_descent_pct = descent_grade_sum / static_cast<double>(descent_count);
+        stats.avg_descent_pct = descent_grade_sum / static_cast<Real>(descent_count);
 
     return stats;
 }
@@ -330,14 +330,14 @@ namespace {
 /// cum_dist[i] = total distance from point 0 to point i, in metres.
 /// timestamps[i] = time_t for point i (-1 if unparseable).
 void build_tables(const std::vector<TrackPoint>& pts,
-                  std::vector<double>&           cum_dist,
-                  std::vector<std::time_t>&      timestamps)
+                  std::vector<Real>&           cum_dist,
+                  std::vector<Time>&      timestamps)
 {
-    const std::size_t n = pts.size();
+    const Size n = pts.size();
     cum_dist.resize(n, 0.0);
     timestamps.resize(n, -1);
 
-    for (std::size_t i = 0; i < n; ++i) {
+    for (Size i = 0; i < n; ++i) {
         timestamps[i] = parse_iso8601(pts[i].time);
         if (i > 0) {
             cum_dist[i] = cum_dist[i - 1]
@@ -348,18 +348,18 @@ void build_tables(const std::vector<TrackPoint>& pts,
 }
 
 /// Fill a BestSegment from two indices and the precomputed tables.
-BestSegment make_segment(std::size_t                    lo,
-                         std::size_t                    hi,
+BestSegment make_segment(Size                    lo,
+                         Size                    hi,
                          const std::vector<TrackPoint>& pts,
-                         const std::vector<double>&     cum_dist,
-                         const std::vector<std::time_t>& timestamps)
+                         const std::vector<Real>&     cum_dist,
+                         const std::vector<Time>& timestamps)
 {
     BestSegment seg;
     seg.valid       = true;
     seg.start_idx   = lo;
     seg.end_idx     = hi;
     seg.distance_m  = cum_dist[hi] - cum_dist[lo];
-    seg.duration_s  = static_cast<long>(timestamps[hi] - timestamps[lo]);
+    seg.duration_s  = static_cast<Long>(timestamps[hi] - timestamps[lo]);
     seg.start_time  = pts[lo].time;
     seg.end_time    = pts[hi].time;
     seg.start_lat   = pts[lo].lat;
@@ -379,8 +379,8 @@ BestSegment make_segment(std::size_t                    lo,
 // GpxReader::fastest_by_distance
 // ---------------------------------------------------------------------------
 
-BestSegment GpxReader::fastest_by_distance(double      window_m,
-                                            std::size_t track_index) const
+BestSegment GpxReader::fastest_by_distance(Real      window_m,
+                                            Size track_index) const
 {
     BestSegment best;
     if (track_index >= data_.tracks.size()) return best;
@@ -388,15 +388,15 @@ BestSegment GpxReader::fastest_by_distance(double      window_m,
     const auto& pts = data_.tracks[track_index].points;
     if (pts.size() < 2) return best;
 
-    std::vector<double>      cum_dist;
-    std::vector<std::time_t> timestamps;
+    std::vector<Real>      cum_dist;
+    std::vector<Time> timestamps;
     build_tables(pts, cum_dist, timestamps);
 
     // Check that the whole track is at least as long as the requested window
     if (cum_dist.back() < window_m) return best;  // valid stays false
 
-    std::size_t hi = 1;
-    for (std::size_t lo = 0; lo < pts.size() - 1; ++lo) {
+    Size hi = 1;
+    for (Size lo = 0; lo < pts.size() - 1; ++lo) {
         // Advance hi until the window covers at least window_m metres
         while (hi < pts.size() - 1 &&
                (cum_dist[hi] - cum_dist[lo]) < window_m) {
@@ -405,14 +405,14 @@ BestSegment GpxReader::fastest_by_distance(double      window_m,
 
         // Skip if timestamps are invalid
         if (timestamps[lo] < 0 || timestamps[hi] < 0) continue;
-        const long dur = static_cast<long>(timestamps[hi] - timestamps[lo]);
+        const Long dur = static_cast<Long>(timestamps[hi] - timestamps[lo]);
         if (dur <= 0) continue;
 
-        const double dist = cum_dist[hi] - cum_dist[lo];
+        const Real dist = cum_dist[hi] - cum_dist[lo];
         if (dist < window_m) continue;  // couldn't fill the window
 
         // Speed over the exact window distance (using actual elapsed time)
-        const double speed = (dist / 1000.0) / (dur / 3600.0);
+        const Real speed = (dist / 1000.0) / (dur / 3600.0);
 
         if (!best.valid || speed > best.avg_speed_kmh) {
             best = make_segment(lo, hi, pts, cum_dist, timestamps);
@@ -426,8 +426,8 @@ BestSegment GpxReader::fastest_by_distance(double      window_m,
 // GpxReader::fastest_by_time
 // ---------------------------------------------------------------------------
 
-BestSegment GpxReader::fastest_by_time(long        window_s,
-                                        std::size_t track_index) const
+BestSegment GpxReader::fastest_by_time(Long        window_s,
+                                        Size track_index) const
 {
     BestSegment best;
     if (track_index >= data_.tracks.size()) return best;
@@ -435,17 +435,17 @@ BestSegment GpxReader::fastest_by_time(long        window_s,
     const auto& pts = data_.tracks[track_index].points;
     if (pts.size() < 2) return best;
 
-    std::vector<double>      cum_dist;
-    std::vector<std::time_t> timestamps;
+    std::vector<Real>      cum_dist;
+    std::vector<Time> timestamps;
     build_tables(pts, cum_dist, timestamps);
 
     // Check that the whole track is at least as long as the requested window
-    const long total_dur = static_cast<long>(
+    const Long total_dur = static_cast<Long>(
         timestamps.back() - timestamps.front());
     if (total_dur < window_s) return best;  // valid stays false
 
-    std::size_t hi = 1;
-    for (std::size_t lo = 0; lo < pts.size() - 1; ++lo) {
+    Size hi = 1;
+    for (Size lo = 0; lo < pts.size() - 1; ++lo) {
         if (timestamps[lo] < 0) continue;
 
         // Advance hi until the window spans at least window_s seconds
@@ -456,11 +456,11 @@ BestSegment GpxReader::fastest_by_time(long        window_s,
         }
 
         if (timestamps[hi] < 0) continue;
-        const long dur = static_cast<long>(timestamps[hi] - timestamps[lo]);
+        const Long dur = static_cast<Long>(timestamps[hi] - timestamps[lo]);
         if (dur < window_s) continue;
 
-        const double dist = cum_dist[hi] - cum_dist[lo];
-        const double speed = (dist / 1000.0) / (dur / 3600.0);
+        const Real dist = cum_dist[hi] - cum_dist[lo];
+        const Real speed = (dist / 1000.0) / (dur / 3600.0);
 
         if (!best.valid || speed > best.avg_speed_kmh) {
             best = make_segment(lo, hi, pts, cum_dist, timestamps);
@@ -474,7 +474,7 @@ BestSegment GpxReader::fastest_by_time(long        window_s,
 // GpxReader::detect_hills
 // ---------------------------------------------------------------------------
 
-std::vector<Hill> GpxReader::detect_hills(std::size_t track_index) const
+std::vector<Hill> GpxReader::detect_hills(Size track_index) const
 {
     std::vector<Hill> hills;
     if (track_index >= data_.tracks.size()) return hills;
@@ -483,29 +483,29 @@ std::vector<Hill> GpxReader::detect_hills(std::size_t track_index) const
     if (pts.size() < 2) return hills;
 
     // Detection thresholds
-    constexpr double MIN_GRADE_PCT    =  1.0;  // step must be at least this steep
-    constexpr double MIN_GAIN_M       = 10.0;  // completed climb must gain this much
-    constexpr double GAP_TOLERANCE_M  = 20.0;  // flat/descent absorbed before hill ends
+    constexpr Real MIN_GRADE_PCT    =  1.0;  // step must be at least this steep
+    constexpr Real MIN_GAIN_M       = 10.0;  // completed climb must gain this much
+    constexpr Real GAP_TOLERANCE_M  = 20.0;  // flat/descent absorbed before hill ends
 
     // Precompute cumulative distances
-    const std::size_t n = pts.size();
-    std::vector<double> cum_dist(n, 0.0);
-    for (std::size_t i = 1; i < n; ++i)
+    const Size n = pts.size();
+    std::vector<Real> cum_dist(n, 0.0);
+    for (Size i = 1; i < n; ++i)
         cum_dist[i] = cum_dist[i-1] + haversine(pts[i-1].lat, pts[i-1].lon,
                                                  pts[i].lat,   pts[i].lon);
 
     // State machine
-    bool        climbing   = false;
-    std::size_t hill_start = 0;   // index where current hill began
-    std::size_t peak_idx   = 0;   // index of highest point so far in current hill
-    double      peak_ele   = 0.0; // elevation at peak_idx
-    double      gap_loss   = 0.0; // cumulative descent since last peak
+    Bool        climbing   = false;
+    Size hill_start = 0;   // index where current hill began
+    Size peak_idx   = 0;   // index of highest point so far in current hill
+    Real      peak_ele   = 0.0; // elevation at peak_idx
+    Real      gap_loss   = 0.0; // cumulative descent since last peak
 
-    auto commit_hill = [&](std::size_t end_idx) {
-        const double gain = pts[end_idx].ele - pts[hill_start].ele;
+    auto commit_hill = [&](Size end_idx) {
+        const Real gain = pts[end_idx].ele - pts[hill_start].ele;
         if (gain < MIN_GAIN_M) return;   // too small — discard
 
-        const double dist = cum_dist[end_idx] - cum_dist[hill_start];
+        const Real dist = cum_dist[end_idx] - cum_dist[hill_start];
         if (dist < 1.0) return;          // degenerate
 
         Hill h;
@@ -521,10 +521,10 @@ std::vector<Hill> GpxReader::detect_hills(std::size_t track_index) const
         hills.push_back(h);
     };
 
-    for (std::size_t i = 1; i < n; ++i) {
-        const double horiz = cum_dist[i] - cum_dist[i-1];
-        const double delta = pts[i].ele - pts[i-1].ele;
-        const double grade = (horiz >= 1.0) ? (delta / horiz) * 100.0 : 0.0;
+    for (Size i = 1; i < n; ++i) {
+        const Real horiz = cum_dist[i] - cum_dist[i-1];
+        const Real delta = pts[i].ele - pts[i-1].ele;
+        const Real grade = (horiz >= 1.0) ? (delta / horiz) * 100.0 : 0.0;
 
         if (!climbing) {
             // Enter climbing state when we see a steep enough uphill step
@@ -582,16 +582,16 @@ namespace {
 /// Barometric pressure via the International Standard Atmosphere, then the
 /// ideal-gas law with the actual temperature. Falls back to `fallback` for
 /// absurd inputs. Returns ~1.225 at sea level / 15 C.
-double air_density(double ele_m, double temp_c, bool has_temp, double fallback) {
-    constexpr double P0 = 101325.0;        // Pa, sea-level pressure
-    constexpr double T0 = 288.15;          // K,  sea-level standard temperature
-    constexpr double L  = 0.0065;          // K/m, tropospheric lapse rate
-    constexpr double R_SPECIFIC = 287.05;  // J/(kg K), dry air
+Real air_density(Real ele_m, Real temp_c, Bool has_temp, Real fallback) {
+    constexpr Real P0 = 101325.0;        // Pa, sea-level pressure
+    constexpr Real T0 = 288.15;          // K,  sea-level standard temperature
+    constexpr Real L  = 0.0065;          // K/m, tropospheric lapse rate
+    constexpr Real R_SPECIFIC = 287.05;  // J/(kg K), dry air
 
-    const double base = 1.0 - (L * ele_m) / T0;
+    const Real base = 1.0 - (L * ele_m) / T0;
     if (base <= 0.0) return fallback;      // guard against nonsensical elevation
-    const double p = P0 * std::pow(base, 5.257);
-    const double T = (has_temp ? temp_c : 15.0) + 273.15;
+    const Real p = P0 * std::pow(base, 5.257);
+    const Real T = (has_temp ? temp_c : 15.0) + 273.15;
     if (T <= 0.0) return fallback;
     return p / (R_SPECIFIC * T);
 }
@@ -599,43 +599,43 @@ double air_density(double ele_m, double temp_c, bool has_temp, double fallback) 
 /// Instantaneous pedal power (W) for one step. Sum of the four resistive
 /// forces times ground speed, divided by drivetrain efficiency. `v_hw` is the
 /// headwind component (m/s; positive = headwind). No clamping here.
-double power_at_step(double v, double a, double grade, double rho,
-                     const PowerParams& p, double v_hw = 0.0) {
-    constexpr double G = 9.8067;           // m/s^2
-    const double theta = std::atan(grade);
-    const double m = p.total_mass_kg;
+Real power_at_step(Real v, Real a, Real grade, Real rho,
+                     const PowerParams& p, Real v_hw = 0.0) {
+    constexpr Real G = 9.8067;           // m/s^2
+    const Real theta = std::atan(grade);
+    const Real m = p.total_mass_kg;
 
-    const double f_gravity = m * G * std::sin(theta);
-    const double f_rolling = m * G * std::cos(theta) * p.crr;
-    const double v_as      = v + v_hw;     // airspeed
+    const Real f_gravity = m * G * std::sin(theta);
+    const Real f_rolling = m * G * std::cos(theta) * p.crr;
+    const Real v_as      = v + v_hw;     // airspeed
     // fabs(v_as)*v_as keeps the drag direction correct: a strong tailwind
     // (v_as < 0) pushes the rider, reversing the aero force sign.
-    const double f_aero    = 0.5 * rho * p.cda * std::fabs(v_as) * v_as;
-    const double f_accel   = m * a;
+    const Real f_aero    = 0.5 * rho * p.cda * std::fabs(v_as) * v_as;
+    const Real f_accel   = m * a;
 
-    const double force = f_gravity + f_rolling + f_aero + f_accel;
+    const Real force = f_gravity + f_rolling + f_aero + f_accel;
     return (force * v) / p.drivetrain_eff;
 }
 
 /// Initial great-circle bearing from point 1 to point 2, in degrees (0 = North,
 /// clockwise), range [0, 360).
-double bearing_deg(double lat1, double lon1, double lat2, double lon2) {
-    constexpr double DEG2RAD = M_PI / 180.0;
-    const double phi1 = lat1 * DEG2RAD;
-    const double phi2 = lat2 * DEG2RAD;
-    const double dlam = (lon2 - lon1) * DEG2RAD;
-    const double y = std::sin(dlam) * std::cos(phi2);
-    const double x = std::cos(phi1) * std::sin(phi2)
+Real bearing_deg(Real lat1, Real lon1, Real lat2, Real lon2) {
+    constexpr Real DEG2RAD = M_PI / 180.0;
+    const Real phi1 = lat1 * DEG2RAD;
+    const Real phi2 = lat2 * DEG2RAD;
+    const Real dlam = (lon2 - lon1) * DEG2RAD;
+    const Real y = std::sin(dlam) * std::cos(phi2);
+    const Real x = std::cos(phi1) * std::sin(phi2)
                    - std::sin(phi1) * std::cos(phi2) * std::cos(dlam);
-    double brng = std::atan2(y, x) / DEG2RAD;
+    Real brng = std::atan2(y, x) / DEG2RAD;
     if (brng < 0.0) brng += 360.0;
     return brng;
 }
 
 /// Headwind component (m/s) for a rider heading `heading_deg` in wind blowing
 /// FROM `wind_from_deg` at `speed`. Positive = headwind, negative = tailwind.
-double headwind_component(double heading_deg, double wind_from_deg, double speed) {
-    constexpr double DEG2RAD = M_PI / 180.0;
+Real headwind_component(Real heading_deg, Real wind_from_deg, Real speed) {
+    constexpr Real DEG2RAD = M_PI / 180.0;
     return speed * std::cos((wind_from_deg - heading_deg) * DEG2RAD);
 }
 
@@ -645,23 +645,23 @@ double headwind_component(double heading_deg, double wind_from_deg, double speed
 // WindData::sample — nearest-hour lookup
 // ---------------------------------------------------------------------------
 
-bool WindData::sample(std::time_t t, double& speed, double& dir) const {
+Bool WindData::sample(Time t, Real& speed, Real& dir) const {
     if (!valid || times.empty()) return false;
 
     auto it = std::lower_bound(times.begin(), times.end(), t);
-    std::size_t idx;
+    Size idx;
     if (it == times.begin()) {
         idx = 0;
     } else if (it == times.end()) {
         idx = times.size() - 1;
     } else {
-        const std::size_t hi = static_cast<std::size_t>(it - times.begin());
-        const std::size_t lo = hi - 1;
+        const Size hi = static_cast<Size>(it - times.begin());
+        const Size lo = hi - 1;
         idx = (t - times[lo] <= times[hi] - t) ? lo : hi;
     }
 
     // Reject if the nearest sample is more than ~90 min away from t
-    const std::time_t diff = (t > times[idx]) ? (t - times[idx]) : (times[idx] - t);
+    const Time diff = (t > times[idx]) ? (t - times[idx]) : (times[idx] - t);
     if (diff > 5400) return false;
 
     speed = speed_ms[idx];
@@ -674,18 +674,18 @@ bool WindData::sample(std::time_t t, double& speed, double& dir) const {
 // ---------------------------------------------------------------------------
 
 PowerAnalysis GpxReader::estimate_power(const PowerParams& params,
-                                        std::size_t track_index,
+                                        Size track_index,
                                         const WindData* wind) const
 {
     PowerAnalysis pa;
     if (track_index >= data_.tracks.size()) return pa;
 
     const auto& pts = data_.tracks[track_index].points;
-    const std::size_t n = pts.size();
+    const Size n = pts.size();
     if (n < 2 || params.total_mass_kg <= 0.0) return pa;
 
-    std::vector<double>      cum_dist;
-    std::vector<std::time_t> timestamps;
+    std::vector<Real>      cum_dist;
+    std::vector<Time> timestamps;
     build_tables(pts, cum_dist, timestamps);
 
     pa.point_power_w.assign(n, 0.0);
@@ -695,11 +695,11 @@ PowerAnalysis GpxReader::estimate_power(const PowerParams& params,
 
     // Elapsed seconds from the first point (for the time-vs-power CSV)
     pa.t_offset_s.assign(n, -1);
-    const std::time_t t0 = timestamps.front();
+    const Time t0 = timestamps.front();
     if (t0 >= 0) {
-        for (std::size_t i = 0; i < n; ++i)
+        for (Size i = 0; i < n; ++i)
             if (timestamps[i] >= 0)
-                pa.t_offset_s[i] = static_cast<long>(timestamps[i] - t0);
+                pa.t_offset_s[i] = static_cast<Long>(timestamps[i] - t0);
     }
 
     // --- Pass 1: raw per-step kinematics -----------------------------------
@@ -707,19 +707,19 @@ PowerAnalysis GpxReader::estimate_power(const PowerParams& params,
     // step implies a large spurious speed/acceleration. Collect the raw series
     // first; the model is evaluated in pass 2 from a smoothed speed so jitter
     // can't produce physically impossible power spikes.
-    std::vector<double> v_raw(n, 0.0);   // ground speed on step (i-1 -> i)
-    std::vector<double> dt_s (n, 0.0);   // step duration (s)
-    std::vector<double> grade(n, 0.0);   // step grade (rise/run)
-    std::vector<double> rho_s(n, params.default_rho);
-    std::vector<double> vhw_s(n, 0.0);   // per-step headwind component
-    std::vector<char>   ok   (n, 0);     // 1 if the step has usable time/speed
+    std::vector<Real> v_raw(n, 0.0);   // ground speed on step (i-1 -> i)
+    std::vector<Real> dt_s (n, 0.0);   // step duration (s)
+    std::vector<Real> grade(n, 0.0);   // step grade (rise/run)
+    std::vector<Real> rho_s(n, params.default_rho);
+    std::vector<Real> vhw_s(n, 0.0);   // per-step headwind component
+    std::vector<Char>   ok   (n, 0);     // 1 if the step has usable time/speed
 
-    double      hw_sum = 0.0;
-    std::size_t hw_count = 0;
+    Real      hw_sum = 0.0;
+    Size hw_count = 0;
 
-    for (std::size_t i = 1; i < n; ++i) {
+    for (Size i = 1; i < n; ++i) {
         if (timestamps[i] < 0 || timestamps[i - 1] < 0) continue;
-        const long dt = static_cast<long>(timestamps[i] - timestamps[i - 1]);
+        const Long dt = static_cast<Long>(timestamps[i] - timestamps[i - 1]);
         if (dt <= 0) continue;
         // A long step is a stop or signal dropout, not riding: leave it as a gap
         // (ok stays 0) so it contributes no power and breaks the accel/smoothing
@@ -727,14 +727,14 @@ PowerAnalysis GpxReader::estimate_power(const PowerParams& params,
         // huge climb and a power spike.
         if (dt > params.max_gap_s) continue;
 
-        const double dist = cum_dist[i] - cum_dist[i - 1];
-        v_raw[i]          = dist / static_cast<double>(dt);
+        const Real dist = cum_dist[i] - cum_dist[i - 1];
+        v_raw[i]          = dist / static_cast<Real>(dt);
         // Reject GPS teleports: a step faster than any real ride is position
         // noise, so cap it before it can pollute speed/aero (raw or smoothed).
         if (v_raw[i] > params.max_speed_ms) v_raw[i] = params.max_speed_ms;
-        dt_s[i]           = static_cast<double>(dt);
+        dt_s[i]           = static_cast<Real>(dt);
         pa.speed_ms[i]    = v_raw[i];     // reported (de-spiked) ground speed
-        const double dele = pts[i].ele - pts[i - 1].ele;
+        const Real dele = pts[i].ele - pts[i - 1].ele;
         grade[i]          = (dist >= 1.0) ? (dele / dist) : 0.0;
         // Clamp to a real-world road gradient; drift-driven slopes are noise.
         if (grade[i] >  params.max_grade) grade[i] =  params.max_grade;
@@ -743,9 +743,9 @@ PowerAnalysis GpxReader::estimate_power(const PowerParams& params,
                                         params.default_rho);
 
         if (wind && wind->valid) {
-            double ws, wd;
+            Real ws, wd;
             if (wind->sample(timestamps[i], ws, wd)) {
-                const double heading = bearing_deg(pts[i - 1].lat, pts[i - 1].lon,
+                const Real heading = bearing_deg(pts[i - 1].lat, pts[i - 1].lon,
                                                    pts[i].lat, pts[i].lon);
                 vhw_s[i]          = headwind_component(heading, wd, ws);
                 pa.headwind_ms[i] = vhw_s[i];
@@ -757,45 +757,45 @@ PowerAnalysis GpxReader::estimate_power(const PowerParams& params,
     }
 
     // --- Speed smoothing: centred time-window moving average ----------------
-    std::vector<double> v_sm = v_raw;
+    std::vector<Real> v_sm = v_raw;
     if (params.smooth_window_s > 0.0) {
-        const long half = static_cast<long>(params.smooth_window_s / 2.0 + 0.5);
-        for (std::size_t i = 1; i < n; ++i) {
+        const Long half = static_cast<Long>(params.smooth_window_s / 2.0 + 0.5);
+        for (Size i = 1; i < n; ++i) {
             if (!ok[i]) continue;
-            double sum_v = v_raw[i];
-            long   cnt   = 1;
-            for (std::size_t j = i - 1; j >= 1; --j) {          // walk left in time
+            Real sum_v = v_raw[i];
+            Long   cnt   = 1;
+            for (Size j = i - 1; j >= 1; --j) {          // walk left in time
                 if (!ok[j] || pa.t_offset_s[i] - pa.t_offset_s[j] > half) break;
                 sum_v += v_raw[j]; ++cnt;
             }
-            for (std::size_t j = i + 1; j < n; ++j) {           // walk right in time
+            for (Size j = i + 1; j < n; ++j) {           // walk right in time
                 if (!ok[j] || pa.t_offset_s[j] - pa.t_offset_s[i] > half) break;
                 sum_v += v_raw[j]; ++cnt;
             }
-            v_sm[i] = sum_v / static_cast<double>(cnt);
+            v_sm[i] = sum_v / static_cast<Real>(cnt);
         }
     }
 
     // --- Pass 2: power from smoothed speed ----------------------------------
-    double      sum = 0.0, energy_j = 0.0, max_p = 0.0;
-    std::size_t count = 0;
-    double      prev_v = 0.0;
-    bool        have_prev_v = false;
+    Real      sum = 0.0, energy_j = 0.0, max_p = 0.0;
+    Size count = 0;
+    Real      prev_v = 0.0;
+    Bool        have_prev_v = false;
 
-    double      meas_sum = 0.0, abs_err_sum = 0.0, bias_sum = 0.0;
-    std::size_t meas_count = 0;
+    Real      meas_sum = 0.0, abs_err_sum = 0.0, bias_sum = 0.0;
+    Size meas_count = 0;
 
-    for (std::size_t i = 1; i < n; ++i) {
+    for (Size i = 1; i < n; ++i) {
         if (!ok[i]) { have_prev_v = false; continue; }  // gap breaks accel chain
 
-        const double v = v_sm[i];
-        double a = have_prev_v ? (v - prev_v) / dt_s[i] : 0.0;
+        const Real v = v_sm[i];
+        Real a = have_prev_v ? (v - prev_v) / dt_s[i] : 0.0;
         // Backstop clamp: no rider sustains this acceleration; the rest is noise.
         if (a >  params.max_accel_ms2) a =  params.max_accel_ms2;
         if (a < -params.max_accel_ms2) a = -params.max_accel_ms2;
         prev_v = v; have_prev_v = true;
 
-        double P = power_at_step(v, a, grade[i], rho_s[i], params, vhw_s[i]);
+        Real P = power_at_step(v, a, grade[i], rho_s[i], params, vhw_s[i]);
         if (params.clamp_negative && P < 0.0) P = 0.0;
 
         pa.point_power_w[i] = P;
@@ -805,7 +805,7 @@ PowerAnalysis GpxReader::estimate_power(const PowerParams& params,
         ++count;
 
         if (pts[i].has_power) {
-            const double meas = static_cast<double>(pts[i].power);
+            const Real meas = static_cast<Real>(pts[i].power);
             meas_sum    += meas;
             abs_err_sum += std::fabs(P - meas);
             bias_sum    += (P - meas);
@@ -815,19 +815,19 @@ PowerAnalysis GpxReader::estimate_power(const PowerParams& params,
 
     if (count > 0) {
         pa.stats.valid       = true;
-        pa.stats.avg_power_w = sum / static_cast<double>(count);
+        pa.stats.avg_power_w = sum / static_cast<Real>(count);
         pa.stats.max_power_w = max_p;
         pa.stats.total_kj    = energy_j / 1000.0;
     }
     if (meas_count > 0) {
         pa.stats.has_measured   = true;
-        pa.stats.avg_measured_w = meas_sum    / static_cast<double>(meas_count);
-        pa.stats.mean_abs_err_w = abs_err_sum / static_cast<double>(meas_count);
-        pa.stats.mean_bias_w    = bias_sum    / static_cast<double>(meas_count);
+        pa.stats.avg_measured_w = meas_sum    / static_cast<Real>(meas_count);
+        pa.stats.mean_abs_err_w = abs_err_sum / static_cast<Real>(meas_count);
+        pa.stats.mean_bias_w    = bias_sum    / static_cast<Real>(meas_count);
     }
     if (hw_count > 0) {
         pa.stats.has_wind        = true;
-        pa.stats.avg_headwind_ms = hw_sum / static_cast<double>(hw_count);
+        pa.stats.avg_headwind_ms = hw_sum / static_cast<Real>(hw_count);
     }
 
     return pa;
@@ -840,20 +840,20 @@ PowerAnalysis GpxReader::estimate_power(const PowerParams& params,
 void GpxReader::attach_climb_power(std::vector<Hill>& hills,
                                    const PowerAnalysis& pa) const
 {
-    const std::size_t n = pa.point_power_w.size();
+    const Size n = pa.point_power_w.size();
     if (n == 0) return;
 
     for (Hill& h : hills) {
         if (h.end_idx >= n || h.end_idx <= h.start_idx) continue;
-        double      s = 0.0;
-        std::size_t c = 0;
+        Real      s = 0.0;
+        Size c = 0;
         // Average the step powers within the climb: indices (start_idx, end_idx]
-        for (std::size_t k = h.start_idx + 1; k <= h.end_idx; ++k) {
+        for (Size k = h.start_idx + 1; k <= h.end_idx; ++k) {
             s += pa.point_power_w[k];
             ++c;
         }
         if (c > 0) {
-            h.avg_power_w = s / static_cast<double>(c);
+            h.avg_power_w = s / static_cast<Real>(c);
             h.has_power   = true;
         }
     }
@@ -867,13 +867,13 @@ namespace {
 
 /// Measured power on step (i-1 -> i): average of the two endpoints when both
 /// carry <power>, otherwise whichever endpoint has it (0 if neither).
-double measured_step_power(const std::vector<TrackPoint>& pts, std::size_t i)
+Real measured_step_power(const std::vector<TrackPoint>& pts, Size i)
 {
-    const bool a = pts[i - 1].has_power;
-    const bool b = pts[i].has_power;
+    const Bool a = pts[i - 1].has_power;
+    const Bool b = pts[i].has_power;
     if (a && b) return 0.5 * (pts[i - 1].power + pts[i].power);
-    if (b)      return static_cast<double>(pts[i].power);
-    if (a)      return static_cast<double>(pts[i - 1].power);
+    if (b)      return static_cast<Real>(pts[i].power);
+    if (a)      return static_cast<Real>(pts[i - 1].power);
     return 0.0;
 }
 
@@ -884,30 +884,30 @@ double measured_step_power(const std::vector<TrackPoint>& pts, std::size_t i)
 // ---------------------------------------------------------------------------
 
 PowerCurve GpxReader::power_curve(const PowerAnalysis&     pa,
-                                  const std::vector<long>& durations_s,
-                                  std::size_t              track_index) const
+                                  const std::vector<Long>& durations_s,
+                                  Size              track_index) const
 {
     PowerCurve curve;
     if (track_index >= data_.tracks.size() || !pa.stats.valid) return curve;
 
     const auto&       pts = data_.tracks[track_index].points;
-    const std::size_t n   = pts.size();
+    const Size n   = pts.size();
     if (n < 2 || pa.point_power_w.size() != n || pa.t_offset_s.size() != n)
         return curve;
 
-    const bool has_meas = pa.stats.has_measured;
+    const Bool has_meas = pa.stats.has_measured;
 
     // Cumulative time and energy (index 0 == 0). Steps with an unusable
     // timestamp contribute nothing, so windows can't accrue phantom energy.
-    std::vector<double> ct(n, 0.0);       // cumulative valid seconds
-    std::vector<double> ce_est(n, 0.0);   // cumulative estimated energy (J)
-    std::vector<double> ce_meas(n, 0.0);  // cumulative measured energy (J)
+    std::vector<Real> ct(n, 0.0);       // cumulative valid seconds
+    std::vector<Real> ce_est(n, 0.0);   // cumulative estimated energy (J)
+    std::vector<Real> ce_meas(n, 0.0);  // cumulative measured energy (J)
 
-    for (std::size_t i = 1; i < n; ++i) {
-        double dt = 0.0;
+    for (Size i = 1; i < n; ++i) {
+        Real dt = 0.0;
         if (pa.t_offset_s[i] >= 0 && pa.t_offset_s[i - 1] >= 0) {
-            const long d = pa.t_offset_s[i] - pa.t_offset_s[i - 1];
-            if (d > 0) dt = static_cast<double>(d);
+            const Long d = pa.t_offset_s[i] - pa.t_offset_s[i - 1];
+            if (d > 0) dt = static_cast<Real>(d);
         }
         ct[i]     = ct[i - 1]     + dt;
         ce_est[i] = ce_est[i - 1] + pa.point_power_w[i] * dt;
@@ -915,26 +915,26 @@ PowerCurve GpxReader::power_curve(const PowerAnalysis&     pa,
             ce_meas[i] = ce_meas[i - 1] + measured_step_power(pts, i) * dt;
     }
 
-    const double total = ct.back();
+    const Real total = ct.back();
     if (total <= 0.0) return curve;
 
     curve.has_measured = has_meas;
 
-    for (long D : durations_s) {
-        if (D <= 0 || static_cast<double>(D) > total) continue;
+    for (Long D : durations_s) {
+        if (D <= 0 || static_cast<Real>(D) > total) continue;
 
         // Two-pointer sliding window maximising energy/time over windows of at
         // least D seconds (mirrors fastest_by_time, energy in place of distance).
-        double best_est = 0.0, best_meas = 0.0;
-        bool   found    = false;
-        std::size_t hi  = 1;
-        for (std::size_t lo = 0; lo < n - 1; ++lo) {
-            while (hi < n - 1 && (ct[hi] - ct[lo]) < static_cast<double>(D))
+        Real best_est = 0.0, best_meas = 0.0;
+        Bool   found    = false;
+        Size hi  = 1;
+        for (Size lo = 0; lo < n - 1; ++lo) {
+            while (hi < n - 1 && (ct[hi] - ct[lo]) < static_cast<Real>(D))
                 ++hi;
-            const double span = ct[hi] - ct[lo];
-            if (span < static_cast<double>(D)) continue;
+            const Real span = ct[hi] - ct[lo];
+            if (span < static_cast<Real>(D)) continue;
 
-            const double avg_est = (ce_est[hi] - ce_est[lo]) / span;
+            const Real avg_est = (ce_est[hi] - ce_est[lo]) / span;
             if (!found || avg_est > best_est) {
                 best_est = avg_est;
                 if (has_meas) best_meas = (ce_meas[hi] - ce_meas[lo]) / span;
@@ -957,53 +957,53 @@ PowerCurve GpxReader::power_curve(const PowerAnalysis&     pa,
 // ---------------------------------------------------------------------------
 
 PowerHistogram GpxReader::power_histogram(const PowerAnalysis& pa,
-                                          double               bin_w,
-                                          std::size_t          track_index) const
+                                          Real               bin_w,
+                                          Size          track_index) const
 {
     PowerHistogram hist;
     if (track_index >= data_.tracks.size() || !pa.stats.valid) return hist;
     if (bin_w <= 0.0) bin_w = 25.0;
 
     const auto&       pts = data_.tracks[track_index].points;
-    const std::size_t n   = pts.size();
+    const Size n   = pts.size();
     if (n < 2 || pa.point_power_w.size() != n || pa.t_offset_s.size() != n)
         return hist;
 
-    const bool has_meas = pa.stats.has_measured;
+    const Bool has_meas = pa.stats.has_measured;
     hist.bin_w        = bin_w;
     hist.has_measured = has_meas;
 
     // First pass: find how many bins we need (largest observed power).
-    double max_p = 0.0;
-    for (std::size_t i = 1; i < n; ++i) {
+    Real max_p = 0.0;
+    for (Size i = 1; i < n; ++i) {
         if (pa.point_power_w[i] > max_p) max_p = pa.point_power_w[i];
         if (has_meas) {
-            const double m = measured_step_power(pts, i);
+            const Real m = measured_step_power(pts, i);
             if (m > max_p) max_p = m;
         }
     }
-    const std::size_t nbins =
-        static_cast<std::size_t>(std::floor(max_p / bin_w)) + 1;
+    const Size nbins =
+        static_cast<Size>(std::floor(max_p / bin_w)) + 1;
 
     hist.bin_lo_w.resize(nbins);
     hist.est_seconds.assign(nbins, 0.0);
     if (has_meas) hist.meas_seconds.assign(nbins, 0.0);
-    for (std::size_t b = 0; b < nbins; ++b)
-        hist.bin_lo_w[b] = static_cast<double>(b) * bin_w;
+    for (Size b = 0; b < nbins; ++b)
+        hist.bin_lo_w[b] = static_cast<Real>(b) * bin_w;
 
-    for (std::size_t i = 1; i < n; ++i) {
+    for (Size i = 1; i < n; ++i) {
         if (pa.t_offset_s[i] < 0 || pa.t_offset_s[i - 1] < 0) continue;
-        const long d = pa.t_offset_s[i] - pa.t_offset_s[i - 1];
+        const Long d = pa.t_offset_s[i] - pa.t_offset_s[i - 1];
         if (d <= 0) continue;
-        const double dt = static_cast<double>(d);
+        const Real dt = static_cast<Real>(d);
 
-        std::size_t be = static_cast<std::size_t>(
+        Size be = static_cast<Size>(
             std::floor(pa.point_power_w[i] / bin_w));
         if (be >= nbins) be = nbins - 1;
         hist.est_seconds[be] += dt;
 
         if (has_meas) {
-            std::size_t bm = static_cast<std::size_t>(
+            Size bm = static_cast<Size>(
                 std::floor(measured_step_power(pts, i) / bin_w));
             if (bm >= nbins) bm = nbins - 1;
             hist.meas_seconds[bm] += dt;

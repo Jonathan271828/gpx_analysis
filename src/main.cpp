@@ -1,6 +1,7 @@
-#include "gpx_reader.h"
-#include "signal.h"
-#include "wind.h"
+#include "arg_parser.hpp"
+#include "gpx_reader.hpp"
+#include "signal.hpp"
+#include "wind.hpp"
 
 #include <algorithm>
 #include <cstdlib>
@@ -11,15 +12,19 @@
 #include <string>
 #include <vector>
 
+// Bring the wind-source mode enum (defined by the argument parser) into scope
+// so obtain_wind() and main() can name it unqualified.
+using arg_parser::WindMode;
+
 // ---------------------------------------------------------------------------
 // Formatting helpers
 // ---------------------------------------------------------------------------
 
 /// Format duration in seconds as "Xh Ym Zs"
-static std::string format_duration(long seconds) {
-    long h = seconds / 3600;
-    long m = (seconds % 3600) / 60;
-    long s = seconds % 60;
+static std::string format_duration(Long seconds) {
+    Long h = seconds / 3600;
+    Long m = (seconds % 3600) / 60;
+    Long s = seconds % 60;
     std::ostringstream oss;
     if (h > 0) oss << h << "h ";
     if (h > 0 || m > 0) oss << m << "m ";
@@ -31,15 +36,15 @@ static std::string format_duration(long seconds) {
 // Print track points
 // ---------------------------------------------------------------------------
 
-static void print_track_points(const Track& track, std::size_t max_print) {
+static void print_track_points(const Track& track, Size max_print) {
     const auto& pts = track.points;
-    const std::size_t total = pts.size();
-    const std::size_t show  = std::min(total, max_print);
+    const Size total = pts.size();
+    const Size show  = std::min(total, max_print);
 
     std::cout << "\n--- Track points (showing first " << show
               << " of " << total << ") ---\n";
 
-    for (std::size_t i = 0; i < show; ++i) {
+    for (Size i = 0; i < show; ++i) {
         const auto& p = pts[i];
         std::cout << std::fixed
                   << "[" << std::setw(5) << (i + 1) << "] "
@@ -145,7 +150,7 @@ static void print_hills(const std::vector<Hill>& hills) {
               << "  " << std::string(24, '-')
               << "\n";
 
-    for (std::size_t i = 0; i < hills.size(); ++i) {
+    for (Size i = 0; i < hills.size(); ++i) {
         const auto& h = hills[i];
         std::cout << " " << std::setw(3) << (i + 1)
                   << "  " << std::setprecision(2) << std::setw(8)
@@ -236,7 +241,7 @@ static void print_power_stats(const PowerStats& ps, const PowerParams& pp) {
 // Write time-vs-power CSV
 // ---------------------------------------------------------------------------
 
-static bool write_power_csv(const std::string&   path,
+static Bool write_power_csv(const std::string&   path,
                             const Track&          track,
                             const PowerAnalysis&  pa)
 {
@@ -244,8 +249,8 @@ static bool write_power_csv(const std::string&   path,
     if (!out) return false;
 
     const auto& pts = track.points;
-    const bool has_meas = pa.stats.has_measured;
-    const bool has_wind = pa.stats.has_wind;
+    const Bool has_meas = pa.stats.has_measured;
+    const Bool has_wind = pa.stats.has_wind;
 
     out << "time,elapsed_s,est_power_w";
     if (has_meas) out << ",measured_power_w";
@@ -253,7 +258,7 @@ static bool write_power_csv(const std::string&   path,
     out << "\n";
 
     out << std::fixed << std::setprecision(1);
-    for (std::size_t i = 0; i < pts.size(); ++i) {
+    for (Size i = 0; i < pts.size(); ++i) {
         out << pts[i].time << ',' << pa.t_offset_s[i] << ',' << pa.point_power_w[i];
         if (has_meas) {
             out << ',';
@@ -277,7 +282,7 @@ static bool write_power_csv(const std::string&   path,
 //   loads cleanly in gnuplot/numpy.
 // ---------------------------------------------------------------------------
 
-static bool write_xy_file(const std::string&   path,
+static Bool write_xy_file(const std::string&   path,
                           const Track&          track,
                           const TrackStats&     stats,
                           const PowerAnalysis&  pa)
@@ -286,18 +291,18 @@ static bool write_xy_file(const std::string&   path,
     if (!out) return false;
 
     const auto& pts      = track.points;
-    const bool  has_hr   = stats.has_hr;
-    const bool  has_pw   = stats.has_power;    // measured power
-    const bool  has_temp = stats.has_atemp;
-    const bool  has_cad  = stats.has_cad;
-    const bool  has_wind = pa.stats.has_wind;
-    const bool  has_est  = pa.stats.valid;     // estimated power series
+    const Bool  has_hr   = stats.has_hr;
+    const Bool  has_pw   = stats.has_power;    // measured power
+    const Bool  has_temp = stats.has_atemp;
+    const Bool  has_cad  = stats.has_cad;
+    const Bool  has_wind = pa.stats.has_wind;
+    const Bool  has_est  = pa.stats.valid;     // estimated power series
 
     // Commented header: column index + name/unit, one line, starts with '#'.
     out << "# GPXAna per-point track data\n";
     if (!track.name.empty()) out << "# track: " << track.name << "\n";
     out << "#";
-    int col = 1;
+    Int col = 1;
     out << " " << col++ << ":elapsed_s"
         << " " << col++ << ":distance_km"
         << " " << col++ << ":velocity_kmh";
@@ -312,7 +317,7 @@ static bool write_xy_file(const std::string&   path,
     if (has_wind) out << " " << col++ << ":headwind_ms";
     out << "\n";
 
-    for (std::size_t i = 0; i < pts.size(); ++i) {
+    for (Size i = 0; i < pts.size(); ++i) {
         const auto& p = pts[i];
         std::ostringstream row;
         row << std::fixed;
@@ -351,7 +356,7 @@ static bool write_xy_file(const std::string&   path,
 // Write the mean-maximal power curve as an XY table (duration vs watts)
 // ---------------------------------------------------------------------------
 
-static bool write_power_curve_file(const std::string& path,
+static Bool write_power_curve_file(const std::string& path,
                                    const PowerCurve&  curve)
 {
     std::ofstream out(path);
@@ -363,7 +368,7 @@ static bool write_power_curve_file(const std::string& path,
     out << "\n";
 
     out << std::fixed << std::setprecision(1);
-    for (std::size_t i = 0; i < curve.duration_s.size(); ++i) {
+    for (Size i = 0; i < curve.duration_s.size(); ++i) {
         out << curve.duration_s[i] << ' ' << curve.est_power_w[i];
         if (curve.has_measured) out << ' ' << curve.meas_power_w[i];
         out << '\n';
@@ -375,7 +380,7 @@ static bool write_power_curve_file(const std::string& path,
 // Write the power histogram as an XY table (power band vs seconds in band)
 // ---------------------------------------------------------------------------
 
-static bool write_power_hist_file(const std::string&    path,
+static Bool write_power_hist_file(const std::string&    path,
                                   const PowerHistogram& hist)
 {
     std::ofstream out(path);
@@ -388,7 +393,7 @@ static bool write_power_hist_file(const std::string&    path,
     out << "\n";
 
     out << std::fixed << std::setprecision(1);
-    for (std::size_t b = 0; b < hist.bin_lo_w.size(); ++b) {
+    for (Size b = 0; b < hist.bin_lo_w.size(); ++b) {
         out << hist.bin_lo_w[b] << ' ' << hist.est_seconds[b];
         if (hist.has_measured) out << ' ' << hist.meas_seconds[b];
         out << '\n';
@@ -407,7 +412,7 @@ static bool write_power_hist_file(const std::string&    path,
 // rectangular and loads cleanly in gnuplot/numpy.
 // ---------------------------------------------------------------------------
 
-static bool write_spectral_file(const std::string&    path,
+static Bool write_spectral_file(const std::string&    path,
                                 const std::string&    channel,
                                 const std::string&    unit,
                                 const SpectralResult& sr)
@@ -422,8 +427,8 @@ static bool write_spectral_file(const std::string&    path,
     out << "# 1:lag_s  2:autocorr  3:freq_hz  4:psd[" << unit << "^2/Hz]\n";
 
     out.precision(8);   // general format: fixed for small, scientific for large
-    const std::size_t rows = sr.freq_hz.size();  // == acf/lag length (padded)
-    for (std::size_t i = 0; i < rows; ++i) {
+    const Size rows = sr.freq_hz.size();  // == acf/lag length (padded)
+    for (Size i = 0; i < rows; ++i) {
         out << sr.lag_s[i] << ' ' << sr.acf[i] << ' '
             << sr.freq_hz[i] << ' ' << sr.psd[i] << '\n';
     }
@@ -440,8 +445,8 @@ static bool write_spectral_file(const std::string&    path,
 struct Channel {
     std::string         name;   // file-name stem, e.g. "velocity"
     std::string         unit;   // e.g. "km/h"
-    std::vector<double> t_s;    // sample times (s from start)
-    std::vector<double> value;  // sample values
+    std::vector<Real> t_s;    // sample times (s from start)
+    std::vector<Real> value;  // sample values
 };
 
 static std::vector<Channel> extract_channels(const Track&         track,
@@ -449,7 +454,7 @@ static std::vector<Channel> extract_channels(const Track&         track,
                                              const PowerAnalysis& pa)
 {
     const auto&       pts = track.points;
-    const std::size_t n   = pts.size();
+    const Size n   = pts.size();
 
     Channel velocity{"velocity", "km/h", {}, {}};
     Channel est_power{"power", "W", {}, {}};
@@ -457,10 +462,10 @@ static std::vector<Channel> extract_channels(const Track&         track,
     Channel hr{"hr", "bpm", {}, {}};
     Channel cadence{"cadence", "rpm", {}, {}};
 
-    for (std::size_t i = 0; i < n; ++i) {
-        const long t = (i < pa.t_offset_s.size()) ? pa.t_offset_s[i] : -1;
+    for (Size i = 0; i < n; ++i) {
+        const Long t = (i < pa.t_offset_s.size()) ? pa.t_offset_s[i] : -1;
         if (t < 0) continue;
-        const double ts = static_cast<double>(t);
+        const Real ts = static_cast<Real>(t);
 
         // Velocity and estimated power are step quantities (defined for i >= 1).
         if (i > 0 && pa.stats.valid) {
@@ -472,15 +477,15 @@ static std::vector<Channel> extract_channels(const Track&         track,
         // Sensor channels: only where the point actually carries the field.
         if (pts[i].has_power) {
             meas_power.t_s.push_back(ts);
-            meas_power.value.push_back(static_cast<double>(pts[i].power));
+            meas_power.value.push_back(static_cast<Real>(pts[i].power));
         }
         if (pts[i].has_hr) {
             hr.t_s.push_back(ts);
-            hr.value.push_back(static_cast<double>(pts[i].hr));
+            hr.value.push_back(static_cast<Real>(pts[i].hr));
         }
         if (pts[i].has_cad) {
             cadence.t_s.push_back(ts);
-            cadence.value.push_back(static_cast<double>(pts[i].cad));
+            cadence.value.push_back(static_cast<Real>(pts[i].cad));
         }
     }
 
@@ -497,11 +502,9 @@ static std::vector<Channel> extract_channels(const Track&         track,
 // Obtain wind data for a track (network fetch and/or JSON cache/file)
 // ---------------------------------------------------------------------------
 
-enum class WindMode { Off, Fetch, Cache, File };
-
 static WindData obtain_wind(WindMode mode, const std::string& path,
-                            const Track& track, std::size_t track_index,
-                            std::size_t ntracks)
+                            const Track& track, Size track_index,
+                            Size ntracks)
 {
     WindData wind;
     if (mode == WindMode::Off) return wind;
@@ -513,10 +516,10 @@ static WindData obtain_wind(WindMode mode, const std::string& path,
     }
 
     // Request location = track centroid (ERA5's ~25 km grid makes finer pointless)
-    double lat_sum = 0.0, lon_sum = 0.0;
+    Real lat_sum = 0.0, lon_sum = 0.0;
     for (const auto& p : pts) { lat_sum += p.lat; lon_sum += p.lon; }
-    const double lat = lat_sum / static_cast<double>(pts.size());
-    const double lon = lon_sum / static_cast<double>(pts.size());
+    const Real lat = lat_sum / static_cast<Real>(pts.size());
+    const Real lon = lon_sum / static_cast<Real>(pts.size());
     const std::string start_date = pts.front().time.substr(0, 10);
     const std::string end_date   = pts.back().time.substr(0, 10);
 
@@ -557,151 +560,39 @@ static WindData obtain_wind(WindMode mode, const std::string& path,
 }
 
 // ---------------------------------------------------------------------------
-// Usage
-// ---------------------------------------------------------------------------
-
-static void print_usage(const char* prog) {
-    std::cerr << "Usage: " << prog << " <file.gpx> [options]\n\n"
-              << "Options:\n"
-              << "  --points N       print first N track points (default: 10)\n"
-              << "  --dist  D        find fastest segment of D km  (e.g. --dist 5.0)\n"
-              << "  --time  T        find fastest segment of T seconds (e.g. --time 300)\n"
-              << "\nPower estimation (Strava-style physics model, runs by default):\n"
-              << "  --mass  M        total rider+bike mass in kg (default: 80)\n"
-              << "  --rider R        rider mass in kg (summed with --bike if --mass unset)\n"
-              << "  --bike  B        bike mass in kg (summed with --rider if --mass unset)\n"
-              << "  --crr   C        rolling resistance coefficient (default: 0.005)\n"
-              << "  --cda   A        aerodynamic drag area CdA in m^2 (default: 0.32)\n"
-              << "  --drivetrain E   drivetrain efficiency 0..1 (default: 0.977)\n"
-              << "  --smooth S       GPS speed smoothing window in s, tames spikes (default: 5; 0 off)\n"
-              << "  --max-accel A    clamp on |acceleration| in m/s^2 (default: 3)\n"
-              << "  --max-speed V    cap on raw step speed in m/s, drops GPS teleports (default: 30)\n"
-              << "  --max-grade G    clamp on |grade| as a fraction (default: 0.30)\n"
-              << "  --max-gap S      steps longer than S seconds count as a stop (default: 10)\n"
-              << "  --power-csv F    write a time-vs-power CSV to file F\n"
-              << "  --xy F           write all per-point data as a #-commented XY table to F\n"
-              << "  --power-curve F  write mean-maximal power curve (duration vs W) to F\n"
-              << "  --power-hist F   write power histogram (time in each power band) to F\n"
-              << "  --hist-bin W     histogram bin width in watts (default: 25)\n"
-              << "\nAutocorrelation & power spectrum (4-col: lag, acf, freq, psd):\n"
-              << "  --acf-velocity F       velocity autocorrelation + spectrum -> F\n"
-              << "  --acf-power F          estimated power                     -> F\n"
-              << "  --acf-power-measured F measured <power>                    -> F\n"
-              << "  --acf-hr F             heart rate                          -> F\n"
-              << "  --acf-cadence F        cadence (rpm)                       -> F\n"
-              << "  --acf-dt S             uniform resample interval in s (default: auto = median)\n"
-              << "\nWind (Open-Meteo historical API; improves the aero term):\n"
-              << "  --wind           fetch historical wind and apply it\n"
-              << "  --wind-cache F   like --wind, but cache to/read from file F\n"
-              << "  --wind-file F    apply wind from local JSON file F (offline)\n"
-              << "\nMultiple --dist and --time flags are supported.\n";
-}
-
-// ---------------------------------------------------------------------------
 // main
 // ---------------------------------------------------------------------------
 
-int main(int argc, char* argv[]) {
-    if (argc < 2) {
-        print_usage(argv[0]);
+Int main(Int argc, Char* argv[]) {
+    // All command-line handling lives in the arg_parser module.
+    arg_parser::Options opts;
+    std::string parse_error;
+    if (!arg_parser::parse(argc, argv, opts, parse_error)) {
+        if (!parse_error.empty()) std::cerr << parse_error << "\n";
+        arg_parser::print_usage(argv[0], std::cerr);
         return EXIT_FAILURE;
     }
 
-    const std::string filepath = argv[1];
-
-    // Parse options
-    std::size_t          max_print   = 10;
-    std::vector<double>  dist_windows;   // km
-    std::vector<long>    time_windows;   // seconds
-
-    // Power estimation parameters (mass is optional; default rider+bike = 80 kg)
-    PowerParams power;
-    double      rider_kg  = 71.0;
-    double      bike_kg   = 9.0;
-    bool        mass_set  = false;
-    double      mass_total = 80.0;
-    std::string power_csv;
-    std::string xy_path;
-    std::string power_curve_path;
-    std::string power_hist_path;
-    double      hist_bin_w = 25.0;
-    std::string acf_velocity;        // per-quantity ACF/PSD output files
-    std::string acf_power;           // estimated power
-    std::string acf_power_measured;  // measured <power>
-    std::string acf_hr;
-    std::string acf_cadence;
-    double      acf_dt = 0.0;        // 0 = auto (median sample interval)
-
-    WindMode    wind_mode = WindMode::Off;
-    std::string wind_path;
-
-    for (int i = 2; i < argc; ++i) {
-        std::string arg = argv[i];
-        if (arg == "--points" && i + 1 < argc) {
-            max_print = static_cast<std::size_t>(std::atoi(argv[++i]));
-        } else if (arg == "--dist" && i + 1 < argc) {
-            dist_windows.push_back(std::atof(argv[++i]));
-        } else if (arg == "--time" && i + 1 < argc) {
-            time_windows.push_back(static_cast<long>(std::atol(argv[++i])));
-        } else if (arg == "--mass" && i + 1 < argc) {
-            mass_total = std::atof(argv[++i]); mass_set = true;
-        } else if (arg == "--rider" && i + 1 < argc) {
-            rider_kg = std::atof(argv[++i]);
-        } else if (arg == "--bike" && i + 1 < argc) {
-            bike_kg = std::atof(argv[++i]);
-        } else if (arg == "--crr" && i + 1 < argc) {
-            power.crr = std::atof(argv[++i]);
-        } else if (arg == "--cda" && i + 1 < argc) {
-            power.cda = std::atof(argv[++i]);
-        } else if (arg == "--drivetrain" && i + 1 < argc) {
-            power.drivetrain_eff = std::atof(argv[++i]);
-        } else if (arg == "--smooth" && i + 1 < argc) {
-            power.smooth_window_s = std::atof(argv[++i]);
-        } else if (arg == "--max-accel" && i + 1 < argc) {
-            power.max_accel_ms2 = std::atof(argv[++i]);
-        } else if (arg == "--max-speed" && i + 1 < argc) {
-            power.max_speed_ms = std::atof(argv[++i]);
-        } else if (arg == "--max-grade" && i + 1 < argc) {
-            power.max_grade = std::atof(argv[++i]);
-        } else if (arg == "--max-gap" && i + 1 < argc) {
-            power.max_gap_s = std::atof(argv[++i]);
-        } else if (arg == "--power-csv" && i + 1 < argc) {
-            power_csv = argv[++i];
-        } else if (arg == "--xy" && i + 1 < argc) {
-            xy_path = argv[++i];
-        } else if (arg == "--power-curve" && i + 1 < argc) {
-            power_curve_path = argv[++i];
-        } else if (arg == "--power-hist" && i + 1 < argc) {
-            power_hist_path = argv[++i];
-        } else if (arg == "--hist-bin" && i + 1 < argc) {
-            hist_bin_w = std::atof(argv[++i]);
-        } else if (arg == "--acf-velocity" && i + 1 < argc) {
-            acf_velocity = argv[++i];
-        } else if (arg == "--acf-power" && i + 1 < argc) {
-            acf_power = argv[++i];
-        } else if (arg == "--acf-power-measured" && i + 1 < argc) {
-            acf_power_measured = argv[++i];
-        } else if (arg == "--acf-hr" && i + 1 < argc) {
-            acf_hr = argv[++i];
-        } else if (arg == "--acf-cadence" && i + 1 < argc) {
-            acf_cadence = argv[++i];
-        } else if (arg == "--acf-dt" && i + 1 < argc) {
-            acf_dt = std::atof(argv[++i]);
-        } else if (arg == "--wind") {
-            wind_mode = WindMode::Fetch;
-        } else if (arg == "--wind-cache" && i + 1 < argc) {
-            wind_mode = WindMode::Cache; wind_path = argv[++i];
-        } else if (arg == "--wind-file" && i + 1 < argc) {
-            wind_mode = WindMode::File; wind_path = argv[++i];
-        } else {
-            std::cerr << "Unknown option: " << arg << "\n";
-            print_usage(argv[0]);
-            return EXIT_FAILURE;
-        }
-    }
-
-    // --mass sets the total directly; otherwise sum rider + bike (default 80 kg)
-    power.total_mass_kg = mass_set ? mass_total : (rider_kg + bike_kg);
+    // Unpack the parsed options into the local names used throughout the run
+    // (all read-only below).
+    const std::string&       filepath           = opts.filepath;
+    const Size               max_print          = opts.max_print;
+    const std::vector<Real>& dist_windows       = opts.dist_windows;
+    const std::vector<Long>& time_windows       = opts.time_windows;
+    const PowerParams&       power              = opts.power;
+    const std::string&       power_csv          = opts.power_csv;
+    const std::string&       xy_path            = opts.xy_path;
+    const std::string&       power_curve_path   = opts.power_curve_path;
+    const std::string&       power_hist_path    = opts.power_hist_path;
+    const Real               hist_bin_w         = opts.hist_bin_w;
+    const std::string&       acf_velocity       = opts.acf_velocity;
+    const std::string&       acf_power          = opts.acf_power;
+    const std::string&       acf_power_measured = opts.acf_power_measured;
+    const std::string&       acf_hr             = opts.acf_hr;
+    const std::string&       acf_cadence        = opts.acf_cadence;
+    const Real               acf_dt             = opts.acf_dt;
+    const WindMode           wind_mode          = opts.wind_mode;
+    const std::string&       wind_path          = opts.wind_path;
 
     // Parse GPX
     GpxReader reader;
@@ -717,7 +608,7 @@ int main(int argc, char* argv[]) {
         std::cout << "Recorded   : " << data.metadata_time << "\n";
     std::cout << "Tracks     : " << data.tracks.size() << "\n";
 
-    for (std::size_t i = 0; i < data.tracks.size(); ++i) {
+    for (Size i = 0; i < data.tracks.size(); ++i) {
         const Track& track = data.tracks[i];
 
         // Track points
@@ -766,7 +657,7 @@ int main(int argc, char* argv[]) {
 
         // Optional mean-maximal power curve (suffix with track index when >1 track)
         if (!power_curve_path.empty()) {
-            static const std::vector<long> kCurveDurations = {
+            static const std::vector<Long> kCurveDurations = {
                 1, 5, 10, 30, 60, 300, 600, 1200, 1800, 3600, 5400};
             PowerCurve curve = reader.power_curve(pa, kCurveDurations, i);
             std::string out_path = (data.tracks.size() > 1)
@@ -805,7 +696,7 @@ int main(int argc, char* argv[]) {
             {"hr",             acf_hr},
             {"cadence",        acf_cadence},
         };
-        const bool any_acf = std::any_of(
+        const Bool any_acf = std::any_of(
             acf_requests.begin(), acf_requests.end(),
             [](const auto& r) { return !r.second.empty(); });
 
@@ -844,7 +735,7 @@ int main(int argc, char* argv[]) {
         }
 
         // Fastest distance-based segments
-        for (double d_km : dist_windows) {
+        for (Real d_km : dist_windows) {
             std::ostringstream lbl;
             lbl << std::fixed << std::setprecision(2) << d_km << " km";
             BestSegment seg = reader.fastest_by_distance(d_km * 1000.0, i);
@@ -852,7 +743,7 @@ int main(int argc, char* argv[]) {
         }
 
         // Fastest time-based segments
-        for (long t_s : time_windows) {
+        for (Long t_s : time_windows) {
             BestSegment seg = reader.fastest_by_time(t_s, i);
             print_best_segment(seg, format_duration(t_s));
         }

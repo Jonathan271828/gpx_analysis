@@ -529,13 +529,16 @@ detection and fastest-segment queries are run independently for each track.
 .
 ├── CMakeLists.txt       Build definition; fetches pugixml v1.14 via FetchContent
 └── src/
-    ├── gpx_reader.h     Data structs (TrackPoint, Track, GpxData, TrackStats,
+    ├── types.hpp       Project-wide scalar type aliases (Real, Int, Size, ...)
+    ├── arg_parser.hpp   Options struct + parse()/print_usage() (namespace arg_parser)
+    ├── arg_parser.cpp   Command-line parsing and usage text
+    ├── gpx_reader.hpp   Data structs (TrackPoint, Track, GpxData, TrackStats,
     │                    Hill, BestSegment) and GpxReader class declaration
     ├── gpx_reader.cpp   GPX parsing (pugixml), statistics, hill detection and
     │                    fastest-segment sliding-window algorithms
-    ├── signal.h         SpectralResult struct and compute_acf_psd() declaration
+    ├── signal.hpp       SpectralResult struct and compute_acf_psd() declaration
     ├── signal.cpp       Resampling, FFT and Wiener–Khinchin autocorrelation/PSD
-    ├── wind.h           WindData helpers (fetch / load / save) declarations
+    ├── wind.hpp         WindData helpers (fetch / load / save) declarations
     ├── wind.cpp         Open-Meteo wind fetch (curl) and JSON cache I/O
-    └── main.cpp         CLI argument parsing and all formatted console output
+    └── main.cpp         Program flow and all formatted console output
 ```

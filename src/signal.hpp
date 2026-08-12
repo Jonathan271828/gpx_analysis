@@ -1,5 +1,7 @@
 #pragma once
 
+#include "types.hpp"
+
 #include <cstddef>
 #include <vector>
 
@@ -20,14 +22,14 @@
 // 4-column table; entries past a column's meaningful range are NaN.
 
 struct SpectralResult {
-    bool                valid     = false;
-    double              dt_s      = 0.0;  // uniform grid spacing actually used (s)
-    std::size_t         n_samples = 0;    // length of the resampled series (M)
+    Bool                valid     = false;
+    Real              dt_s      = 0.0;  // uniform grid spacing actually used (s)
+    Size         n_samples = 0;    // length of the resampled series (M)
 
-    std::vector<double> lag_s;    // column 1: time lag (s); NaN past lag M-1
-    std::vector<double> acf;      // column 2: normalized autocorrelation (acf[0]=1)
-    std::vector<double> freq_hz;  // column 3: frequency (Hz), 0 .. Nyquist
-    std::vector<double> psd;      // column 4: one-sided power spectral density
+    std::vector<Real> lag_s;    // column 1: time lag (s); NaN past lag M-1
+    std::vector<Real> acf;      // column 2: normalized autocorrelation (acf[0]=1)
+    std::vector<Real> freq_hz;  // column 3: frequency (Hz), 0 .. Nyquist
+    std::vector<Real> psd;      // column 4: one-sided power spectral density
 };
 
 /// Compute the autocorrelation function and its power spectrum for an
@@ -38,6 +40,6 @@ struct SpectralResult {
 ///
 /// Returns valid == false when there is too little data (< 4 samples or a span
 /// shorter than a few grid steps) or the signal is constant (zero variance).
-SpectralResult compute_acf_psd(const std::vector<double>& t_s,
-                               const std::vector<double>& values,
-                               double dt_s = 0.0);
+SpectralResult compute_acf_psd(const std::vector<Real>& t_s,
+                               const std::vector<Real>& values,
+                               Real dt_s = 0.0);

@@ -23,6 +23,7 @@ FetchContent_MakeAvailable(pugixml nlohmann_json)
 
 add_executable(gpx_reader
     src/main.cpp
+    src/arg_parser.cpp
     src/gpx_reader.cpp
     src/wind.cpp
     src/signal.cpp
