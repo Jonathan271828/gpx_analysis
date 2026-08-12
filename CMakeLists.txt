@@ -25,6 +25,7 @@ add_executable(gpx_reader
     src/main.cpp
     src/gpx_reader.cpp
     src/wind.cpp
+    src/signal.cpp
 )
 
 target_link_libraries(gpx_reader PRIVATE

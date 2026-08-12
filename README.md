@@ -17,6 +17,8 @@ time window.
 - Optional historical wind (Open-Meteo) folded into the aerodynamic term for a
   more accurate power estimate
 - Fastest segment finder: sliding-window search by distance or time
+- Autocorrelation function and power spectrum of each time-dependent channel
+  (velocity, power, heart rate, cadence), exported as 4-column text files
 - Multiple `--dist` and `--time` queries supported in a single run
 
 ## Requirements
@@ -67,6 +69,14 @@ Power estimation (runs by default):
   --power-hist F   write power histogram (time in each power band) to F
   --hist-bin W     histogram bin width in watts (default: 25)
 
+Autocorrelation & power spectrum (4-col: lag, acf, freq, psd):
+  --acf-velocity F       velocity autocorrelation + spectrum -> F
+  --acf-power F          estimated power                     -> F
+  --acf-power-measured F measured <power>                    -> F
+  --acf-hr F             heart rate                          -> F
+  --acf-cadence F        cadence (rpm)                       -> F
+  --acf-dt S             uniform resample interval in s (default: auto = median)
+
 Wind (Open-Meteo historical API; improves the aero term):
   --wind           fetch historical wind and apply it
   --wind-cache F   like --wind, but cache to / read from file F
@@ -90,6 +100,9 @@ separately.
 
 # Write a mean-maximal power curve and a power histogram (50 W bins)
 ./build/gpx_reader ride.gpx --points 0 --power-curve curve.txt --power-hist hist.txt --hist-bin 50
+
+# Autocorrelation + power spectrum for selected channels (one flag each)
+./build/gpx_reader ride.gpx --points 0 --acf-hr hr.txt --acf-cadence cad.txt
 ```
 
 The power estimate is de-spiked before use: GPS speed is smoothed over a short
@@ -322,6 +335,161 @@ a regional hourly estimate — it captures the prevailing wind of the day, not
 gusts or local terrain effects (valleys, tree cover). For rides in the last few
 days the archive may not yet have data.
 
+## Autocorrelation & power spectrum
+
+Each time-dependent channel has its own flag, and each names the file it writes
+to — `--acf-velocity F`, `--acf-power F` (estimated), `--acf-power-measured F`
+(the file's `<power>`), `--acf-hr F` and `--acf-cadence F`. Only the channels you
+ask for are computed; a requested channel the track doesn't carry (or a constant
+signal) is skipped with a message. With more than one track the output name gains
+a `.N` suffix per track.
+
+Each file is a 4-column, `#`-commented table:
+
+| Column | Meaning |
+|---|---|
+| 1 `lag_s` | time lag τ of the autocorrelation (s) |
+| 2 `autocorr` | normalized autocorrelation at that lag (`acf[0] = 1`) |
+| 3 `freq_hz` | frequency (Hz), from 0 to the Nyquist frequency `1/(2·dt)` |
+| 4 `psd` | one-sided power spectral density at that frequency (`unit²/Hz`) |
+
+**Method.** GPX samples are irregular in time, so each channel is first linearly
+resampled onto a uniform grid of spacing `dt` (`--acf-dt`, default = the median
+sample interval, at least 1 s). The mean is removed, and the
+[Wiener–Khinchin theorem](https://en.wikipedia.org/wiki/Wiener%E2%80%93Khinchin_theorem)
+is applied via an FFT: the power spectrum is `|FFT(signal)|²` and the
+autocorrelation is the inverse FFT of that spectrum.
+
+The lag/ACF pair (time domain) and the freq/PSD pair (frequency domain) have
+different natural lengths, so the shorter columns are padded with `NaN` to keep
+the file rectangular — plot columns 1:2 for the autocorrelation and 3:4 for the
+spectrum:
+
+```bash
+gnuplot -p -e "plot 'power.txt' using 1:2 with lines"                 # ACF
+gnuplot -p -e "set logscale xy; plot 'power.txt' using 3:4 with lines" # PSD
+```
+
+## Interpreting the results
+
+The two curves answer different questions. The **autocorrelation function (ACF)**
+tells you about *timescales* — "how long does this signal stay similar to
+itself?" The **power spectrum (PSD)** tells you about *periodicity and where the
+variability lives* — "is the ride dominated by slow drifts or fast surges, and is
+anything rhythmic?" They are two views of the same information (one is the
+Fourier transform of the other), so use whichever makes a given feature obvious.
+
+### Reading the two curves
+
+**Autocorrelation (column 2 vs lag, column 1).** Always starts at `1.0` at lag 0
+and decays as the lag grows.
+
+- **Correlation time** `τc` — the lag where the ACF first drops to about `1/e`
+  (≈ 0.37). This is the signal's *memory*: how long, on average, it holds its
+  value. A large `τc` (minutes) means smooth, steady, persistent; a small `τc`
+  (seconds) means jumpy and rapidly changing.
+- **Oscillation** — if the ACF dips below zero and swings back up periodically,
+  the signal is *periodic*, and the spacing between ACF peaks is the period.
+- **A raised, slowly-decaying tail** — a long trend/drift over the ride (e.g.
+  heart-rate drift).
+
+**Power spectrum (column 4 vs frequency, column 3).** Shows how the signal's
+variance is spread across frequencies (period = `1 / frequency`).
+
+- **A sharp peak** at frequency `f` means a repeating pattern with period `1/f`
+  (structured intervals, circuit laps, regular rollers).
+- **Energy piled at low frequency** (steep fall-off) = slow changes dominate =
+  steady riding. **A fat high-frequency tail** = lots of rapid fluctuation =
+  surgy riding.
+- The DC bin (`f = 0`) is ≈ 0 by construction — the mean is removed, so the
+  spectrum shows *fluctuations about your average*, not the average itself.
+
+### What each channel tells you
+
+#### Power (`--acf-power`, `--acf-power-measured`) — the most useful for training
+
+This is the spectral view of how evenly you paced.
+
+| You see | It means | To improve |
+|---|---|---|
+| ACF stays high for minutes; PSD steeply low-frequency | Steady, even effort — ideal for a time trial, sustained climb or endurance block | Already good; this is the target for steady efforts |
+| ACF collapses within seconds; fat high-frequency PSD tail | Surgy, stop-and-go effort — crit, group ride, technical terrain, or ragged pacing | Anticipate hills/corners, feather rather than stab the pedals; smoothing power lowers the high-frequency tail and usually raises sustainable output |
+| ACF oscillates with period `T`; sharp PSD peak at `1/T` | Structured intervals with cycle length `T` (e.g. 40 s on / 20 s off → `T` = 60 s → peak at ≈ 0.017 Hz) | Confirms you actually held the prescribed work/rest structure — a fuzzy or absent peak means the intervals drifted |
+| Estimated vs measured PSD differ mostly at high frequency | Real power meter captures micro-surges the physics estimate smooths out | Those micro-surges above threshold cost disproportionate energy — flattening them is "free" endurance |
+
+The correlation time of power is essentially a Variability-Index-style measure:
+**longer `τc` and less high-frequency energy = more even, more sustainable
+riding.**
+
+#### Heart rate (`--acf-hr`)
+
+Heart rate is a slow, inertial response to effort (cardiovascular time constant
+of roughly 30–60 s), so its curves look very different from power — *by design,
+not because the data is bad*.
+
+- Expect a **long correlation time (minutes)** and a PSD that collapses almost
+  entirely to the lowest frequencies.
+- **Compare the HR spectrum with the power spectrum.** Above some frequency the
+  HR spectrum falls well below the power spectrum: that is your body's low-pass
+  cutoff. Efforts shorter than ~1–2 minutes barely move HR — which is exactly why
+  **HR is a poor guide for short/interval efforts; trust power there** and use HR
+  for steady aerobic pacing.
+- A rising lowest-frequency component (beyond the effort structure) is **cardiac
+  drift** — heat, dehydration or fatigue pushing HR up at constant power.
+  Actionable: cool, fuel, hydrate, or start steadier.
+
+#### Velocity (`--acf-velocity`)
+
+- Correlation time = how long you hold a steady speed — long on open roads,
+  short in traffic or on twisty descents.
+- **PSD peaks reveal repeating route structure:** laps of a circuit show a peak
+  at `1 / lap-time`; evenly spaced rollers show a peak at their spacing.
+- Comparing velocity with power: on the flat, velocity tracks power closely; on
+  rolling terrain, velocity carries extra low-frequency content from the gradient
+  even when your power is constant — a quick way to see how terrain-driven the
+  ride was.
+
+#### Cadence (`--acf-cadence`)
+
+- Correlation time ≈ how long you stay in a gear before shifting. Long and smooth
+  on a flat road or trainer; choppy on rolling terrain or in stop-and-go riding.
+- Frequent coasting shows up as cadence dropping to zero, adding both low- and
+  high-frequency content.
+- **A tight, high-`τc` cadence** means consistent pedalling; a jumpy cadence with
+  lots of high-frequency energy means frequent shifts/coasting. For steady
+  efforts, holding cadence steady tends to steady your power too.
+
+### Reading a whole ride at a glance
+
+- **Well-paced time trial / climb:** power and velocity ACFs decay slowly, their
+  PSDs are steep and low-frequency, HR sits high with a long `τc`. Clean and
+  boring is the goal.
+- **Interval workout:** clear PSD peaks in power (and often HR/velocity) at the
+  interval-cycle frequency; oscillating ACFs. Missing/blurry peaks mean the
+  structure slipped.
+- **Group ride / crit:** broad, high-frequency-heavy PSDs and short correlation
+  times across power, velocity and cadence — lots of surging and coasting.
+- **Fatigue / heat:** power structure unchanged, but the HR spectrum grows a
+  stronger very-low-frequency component (drift).
+
+### Caveats (so you don't over-read the plots)
+
+- **Nyquist limit.** At the default 1 s grid the highest visible frequency is
+  0.5 Hz (period 2 s). This means the **pedal-stroke rate is invisible**: 90 rpm
+  is a 1.5 Hz crank rate, far above Nyquist. The cadence channel is your
+  *reported average rpm over time*, not the crank-rotation signal — don't look
+  for a "pedalling" peak.
+- **Gaps and stops.** Resampling interpolates across dropouts and stops, which
+  injects mostly spurious low-frequency energy. A ride with long stops will look
+  more low-frequency than it really was.
+- **Non-stationarity.** A whole ride mixes regimes (warm-up, climbs, fatigue), so
+  one global spectrum blends them. For a specific claim — "were my intervals
+  on-period?" — analyse just that segment of the ride.
+- **Trend leakage & estimator bias.** The mean is removed but a linear drift is
+  not, so slow trends land in the lowest bins; and the ACF is slightly attenuated
+  at large lags (standard biased estimator). Read the *shape* and *peak
+  locations*, not the absolute values of the far tail.
+
 ## GPX format support
 
 The parser reads GPX 1.1 files. The following elements are extracted:
@@ -365,5 +533,9 @@ detection and fastest-segment queries are run independently for each track.
     │                    Hill, BestSegment) and GpxReader class declaration
     ├── gpx_reader.cpp   GPX parsing (pugixml), statistics, hill detection and
     │                    fastest-segment sliding-window algorithms
+    ├── signal.h         SpectralResult struct and compute_acf_psd() declaration
+    ├── signal.cpp       Resampling, FFT and Wiener–Khinchin autocorrelation/PSD
+    ├── wind.h           WindData helpers (fetch / load / save) declarations
+    ├── wind.cpp         Open-Meteo wind fetch (curl) and JSON cache I/O
     └── main.cpp         CLI argument parsing and all formatted console output
 ```

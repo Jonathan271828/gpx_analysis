@@ -2,8 +2,10 @@
 
 #include <pugixml.hpp>
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <ctime>
+#include <initializer_list>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -29,6 +31,36 @@ double haversine(double lat1, double lon1, double lat2, double lon2) {
                    * std::sin(dlam / 2) * std::sin(dlam / 2);
 
     return R * 2.0 * std::atan2(std::sqrt(a), std::sqrt(1.0 - a));
+}
+
+/// Local name of an XML element, i.e. the part after any namespace prefix.
+/// pugixml keeps the prefix in the node name ("ns3:hr"), so "ns3:hr" -> "hr".
+std::string local_name(const char* qualified) {
+    std::string s = qualified ? qualified : "";
+    const std::size_t colon = s.rfind(':');
+    return (colon == std::string::npos) ? s : s.substr(colon + 1);
+}
+
+/// Case-insensitive ASCII string compare.
+bool iequals(const std::string& a, const std::string& b) {
+    if (a.size() != b.size()) return false;
+    for (std::size_t i = 0; i < a.size(); ++i)
+        if (std::tolower(static_cast<unsigned char>(a[i])) !=
+            std::tolower(static_cast<unsigned char>(b[i])))
+            return false;
+    return true;
+}
+
+/// First direct child of `parent` whose local name matches `name` (ignoring any
+/// namespace prefix, case-insensitively). Returns a null node if none match.
+/// This lets us read sensor fields regardless of the prefix a given exporter
+/// uses — ns3:, gpxtpx:, gpxdata:, or no prefix at all.
+pugi::xml_node child_by_local_name(const pugi::xml_node& parent,
+                                   const std::string&    name) {
+    for (pugi::xml_node c : parent.children())
+        if (iequals(local_name(c.name()), name))
+            return c;
+    return pugi::xml_node();
 }
 
 /// Parse an ISO-8601 timestamp string ("2026-03-31T09:46:45.000Z") to time_t.
@@ -87,36 +119,53 @@ bool GpxReader::parse(const std::string& filepath) {
                 pt.ele = trkpt.child("ele").text().as_double();
                 pt.time = trkpt.child("time").child_value();
 
-                // Extensions: look for the Garmin TrackPointExtension fields
+                // Extensions: read the per-point sensor fields. Exporters vary
+                // in the namespace prefix they use (ns3:, gpxtpx:, gpxdata:, or
+                // none) and in whether the fields sit inside a
+                // TrackPointExtension wrapper or directly under <extensions>, so
+                // we match every field by its local (prefix-stripped) name and
+                // look in both places. Element-name aliases below cover the
+                // spellings different devices/apps emit for the same quantity.
                 pugi::xml_node ext = trkpt.child("extensions");
                 if (ext) {
-                    // The namespace prefix is part of the element name in pugixml
-                    pugi::xml_node tpe = ext.child("ns3:TrackPointExtension");
-                    if (tpe) {
-                        pugi::xml_node atemp_node = tpe.child("ns3:atemp");
-                        if (atemp_node) {
-                            pt.atemp = atemp_node.text().as_double();
-                            pt.has_atemp = true;
-                        }
-                        pugi::xml_node hr_node = tpe.child("ns3:hr");
-                        if (hr_node) {
-                            pt.hr = hr_node.text().as_int();
-                            pt.has_hr = true;
-                        }
-                        pugi::xml_node cad_node = tpe.child("ns3:cad");
-                        if (cad_node) {
-                            pt.cad = cad_node.text().as_int();
-                            pt.has_cad = true;
-                        }
-                    }
+                    // Sensor fields usually live inside <TrackPointExtension>;
+                    // fall back to <extensions> itself when there's no wrapper.
+                    pugi::xml_node tpe =
+                        child_by_local_name(ext, "TrackPointExtension");
+                    const pugi::xml_node& sensors = tpe ? tpe : ext;
 
-                    // Power lives directly under <extensions> as <power> in the
-                    // Garmin schema; some exporters emit <ns3:power> inside the
-                    // TrackPointExtension instead — accept both.
-                    pugi::xml_node pw = ext.child("power");
-                    if (!pw && tpe) pw = tpe.child("ns3:power");
-                    if (pw) {
-                        pt.power = pw.text().as_int();
+                    // Look a field up in the wrapper first, then directly under
+                    // <extensions> — accepting any of the given name aliases.
+                    auto find_field = [&](std::initializer_list<const char*> names)
+                        -> pugi::xml_node {
+                        for (const char* nm : names) {
+                            pugi::xml_node n = child_by_local_name(sensors, nm);
+                            if (!n && tpe) n = child_by_local_name(ext, nm);
+                            if (n) return n;
+                        }
+                        return pugi::xml_node();
+                    };
+
+                    if (pugi::xml_node n = find_field({"atemp", "temp"})) {
+                        pt.atemp = n.text().as_double();
+                        pt.has_atemp = true;
+                    }
+                    // Heart rate (heart frequency): "hr", or the long spellings
+                    // some exporters use.
+                    if (pugi::xml_node n = find_field({"hr", "heartrate",
+                                                       "heart_rate"})) {
+                        pt.hr = n.text().as_int();
+                        pt.has_hr = true;
+                    }
+                    // Cadence (pedalling/step rpm): "cad" or "cadence".
+                    if (pugi::xml_node n = find_field({"cad", "cadence"})) {
+                        pt.cad = n.text().as_int();
+                        pt.has_cad = true;
+                    }
+                    // Power: often directly under <extensions> as <power>, or
+                    // inside the wrapper as <power>/<watts>.
+                    if (pugi::xml_node n = find_field({"power", "watts"})) {
+                        pt.power = n.text().as_int();
                         pt.has_power = true;
                     }
                 }

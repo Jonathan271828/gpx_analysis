@@ -1,6 +1,8 @@
 #include "gpx_reader.h"
+#include "signal.h"
 #include "wind.h"
 
+#include <algorithm>
 #include <cstdlib>
 #include <fstream>
 #include <iomanip>
@@ -395,6 +397,103 @@ static bool write_power_hist_file(const std::string&    path,
 }
 
 // ---------------------------------------------------------------------------
+// Write a channel's autocorrelation + power spectrum as a 4-column table
+//
+//   col 1: time lag (s)      col 2: normalized autocorrelation
+//   col 3: frequency (Hz)    col 4: power spectral density
+//
+// The time-domain (lag/acf) and frequency-domain (freq/psd) pairs have
+// different natural lengths; the shorter is NaN-padded so the file stays
+// rectangular and loads cleanly in gnuplot/numpy.
+// ---------------------------------------------------------------------------
+
+static bool write_spectral_file(const std::string&    path,
+                                const std::string&    channel,
+                                const std::string&    unit,
+                                const SpectralResult& sr)
+{
+    std::ofstream out(path);
+    if (!out) return false;
+
+    out << "# GPXAna autocorrelation & power spectrum: " << channel
+        << " (" << unit << ")\n";
+    out << "# resampled dt = " << sr.dt_s << " s, samples = " << sr.n_samples
+        << "\n";
+    out << "# 1:lag_s  2:autocorr  3:freq_hz  4:psd[" << unit << "^2/Hz]\n";
+
+    out.precision(8);   // general format: fixed for small, scientific for large
+    const std::size_t rows = sr.freq_hz.size();  // == acf/lag length (padded)
+    for (std::size_t i = 0; i < rows; ++i) {
+        out << sr.lag_s[i] << ' ' << sr.acf[i] << ' '
+            << sr.freq_hz[i] << ' ' << sr.psd[i] << '\n';
+    }
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// Extract the time-dependent channels (time in seconds + value) from a track.
+// Only samples with a valid timestamp and a present value are included, so
+// each channel is ready to hand to compute_acf_psd(). Channels the track does
+// not carry come back empty and are skipped by the caller.
+// ---------------------------------------------------------------------------
+
+struct Channel {
+    std::string         name;   // file-name stem, e.g. "velocity"
+    std::string         unit;   // e.g. "km/h"
+    std::vector<double> t_s;    // sample times (s from start)
+    std::vector<double> value;  // sample values
+};
+
+static std::vector<Channel> extract_channels(const Track&         track,
+                                             const TrackStats&    stats,
+                                             const PowerAnalysis& pa)
+{
+    const auto&       pts = track.points;
+    const std::size_t n   = pts.size();
+
+    Channel velocity{"velocity", "km/h", {}, {}};
+    Channel est_power{"power", "W", {}, {}};
+    Channel meas_power{"power_measured", "W", {}, {}};
+    Channel hr{"hr", "bpm", {}, {}};
+    Channel cadence{"cadence", "rpm", {}, {}};
+
+    for (std::size_t i = 0; i < n; ++i) {
+        const long t = (i < pa.t_offset_s.size()) ? pa.t_offset_s[i] : -1;
+        if (t < 0) continue;
+        const double ts = static_cast<double>(t);
+
+        // Velocity and estimated power are step quantities (defined for i >= 1).
+        if (i > 0 && pa.stats.valid) {
+            velocity.t_s.push_back(ts);
+            velocity.value.push_back(pa.speed_ms[i] * 3.6);   // m/s -> km/h
+            est_power.t_s.push_back(ts);
+            est_power.value.push_back(pa.point_power_w[i]);
+        }
+        // Sensor channels: only where the point actually carries the field.
+        if (pts[i].has_power) {
+            meas_power.t_s.push_back(ts);
+            meas_power.value.push_back(static_cast<double>(pts[i].power));
+        }
+        if (pts[i].has_hr) {
+            hr.t_s.push_back(ts);
+            hr.value.push_back(static_cast<double>(pts[i].hr));
+        }
+        if (pts[i].has_cad) {
+            cadence.t_s.push_back(ts);
+            cadence.value.push_back(static_cast<double>(pts[i].cad));
+        }
+    }
+
+    std::vector<Channel> out;
+    if (pa.stats.valid)  { out.push_back(std::move(velocity));
+                           out.push_back(std::move(est_power)); }
+    if (stats.has_power)   out.push_back(std::move(meas_power));
+    if (stats.has_hr)      out.push_back(std::move(hr));
+    if (stats.has_cad)     out.push_back(std::move(cadence));
+    return out;
+}
+
+// ---------------------------------------------------------------------------
 // Obtain wind data for a track (network fetch and/or JSON cache/file)
 // ---------------------------------------------------------------------------
 
@@ -484,6 +583,13 @@ static void print_usage(const char* prog) {
               << "  --power-curve F  write mean-maximal power curve (duration vs W) to F\n"
               << "  --power-hist F   write power histogram (time in each power band) to F\n"
               << "  --hist-bin W     histogram bin width in watts (default: 25)\n"
+              << "\nAutocorrelation & power spectrum (4-col: lag, acf, freq, psd):\n"
+              << "  --acf-velocity F       velocity autocorrelation + spectrum -> F\n"
+              << "  --acf-power F          estimated power                     -> F\n"
+              << "  --acf-power-measured F measured <power>                    -> F\n"
+              << "  --acf-hr F             heart rate                          -> F\n"
+              << "  --acf-cadence F        cadence (rpm)                       -> F\n"
+              << "  --acf-dt S             uniform resample interval in s (default: auto = median)\n"
               << "\nWind (Open-Meteo historical API; improves the aero term):\n"
               << "  --wind           fetch historical wind and apply it\n"
               << "  --wind-cache F   like --wind, but cache to/read from file F\n"
@@ -519,6 +625,12 @@ int main(int argc, char* argv[]) {
     std::string power_curve_path;
     std::string power_hist_path;
     double      hist_bin_w = 25.0;
+    std::string acf_velocity;        // per-quantity ACF/PSD output files
+    std::string acf_power;           // estimated power
+    std::string acf_power_measured;  // measured <power>
+    std::string acf_hr;
+    std::string acf_cadence;
+    double      acf_dt = 0.0;        // 0 = auto (median sample interval)
 
     WindMode    wind_mode = WindMode::Off;
     std::string wind_path;
@@ -563,6 +675,18 @@ int main(int argc, char* argv[]) {
             power_hist_path = argv[++i];
         } else if (arg == "--hist-bin" && i + 1 < argc) {
             hist_bin_w = std::atof(argv[++i]);
+        } else if (arg == "--acf-velocity" && i + 1 < argc) {
+            acf_velocity = argv[++i];
+        } else if (arg == "--acf-power" && i + 1 < argc) {
+            acf_power = argv[++i];
+        } else if (arg == "--acf-power-measured" && i + 1 < argc) {
+            acf_power_measured = argv[++i];
+        } else if (arg == "--acf-hr" && i + 1 < argc) {
+            acf_hr = argv[++i];
+        } else if (arg == "--acf-cadence" && i + 1 < argc) {
+            acf_cadence = argv[++i];
+        } else if (arg == "--acf-dt" && i + 1 < argc) {
+            acf_dt = std::atof(argv[++i]);
         } else if (arg == "--wind") {
             wind_mode = WindMode::Fetch;
         } else if (arg == "--wind-cache" && i + 1 < argc) {
@@ -670,6 +794,53 @@ int main(int argc, char* argv[]) {
                 std::cout << "Wrote power histogram: " << out_path << "\n\n";
             else
                 std::cerr << "Error: could not write power histogram to " << out_path << "\n";
+        }
+
+        // Optional autocorrelation + power spectrum: one flag per quantity,
+        // each writing its own 4-column file. Only the requested channels run.
+        const std::vector<std::pair<std::string, std::string>> acf_requests = {
+            {"velocity",       acf_velocity},
+            {"power",          acf_power},
+            {"power_measured", acf_power_measured},
+            {"hr",             acf_hr},
+            {"cadence",        acf_cadence},
+        };
+        const bool any_acf = std::any_of(
+            acf_requests.begin(), acf_requests.end(),
+            [](const auto& r) { return !r.second.empty(); });
+
+        if (any_acf) {
+            std::vector<Channel> channels = extract_channels(track, stats, pa);
+            for (const auto& [name, req] : acf_requests) {
+                if (req.empty()) continue;                 // quantity not asked for
+
+                // Suffix with the track index when the file has several tracks.
+                const std::string out_path = (data.tracks.size() > 1)
+                                           ? req + "." + std::to_string(i) : req;
+
+                // Locate the extracted channel; absent means the track lacks it.
+                const Channel* ch = nullptr;
+                for (const Channel& c : channels)
+                    if (c.name == name) { ch = &c; break; }
+                if (!ch) {
+                    std::cerr << "ACF/PSD: '" << name
+                              << "' not present in this track — skipping "
+                              << out_path << "\n";
+                    continue;
+                }
+
+                SpectralResult sr = compute_acf_psd(ch->t_s, ch->value, acf_dt);
+                if (!sr.valid)
+                    std::cerr << "ACF/PSD: not enough / constant data for " << name
+                              << " — skipping " << out_path << "\n";
+                else if (write_spectral_file(out_path, ch->name, ch->unit, sr))
+                    std::cout << "Wrote autocorrelation/spectrum: " << out_path
+                              << " (dt=" << sr.dt_s << "s, " << sr.n_samples
+                              << " samples)\n";
+                else
+                    std::cerr << "Error: could not write " << out_path << "\n";
+            }
+            std::cout << "\n";
         }
 
         // Fastest distance-based segments
