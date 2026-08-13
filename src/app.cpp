@@ -3,6 +3,7 @@
 #include "channels.hpp"
 #include "cp_model.hpp"
 #include "file_output.hpp"
+#include "durability.hpp"
 #include "gpx_reader.hpp"
 #include "io_base.hpp"
 #include "metrics.hpp"
@@ -70,6 +71,7 @@ Real analyse_track(GpxReader&                 reader,
     io::print_decoupling(metrics::decoupling(track, pa));
     io::print_zone_table(zones::power_zones(track, pa, opts.ftp_w));
     io::print_zone_table(zones::hr_zones(track, pa, opts.lthr, opts.max_hr));
+    io::print_zone_table(zones::cadence_zones(track, pa));
     if (opts.split_km > 0.0)
         io::print_splits(splits::by_distance(track, pa, opts.split_km));
 
@@ -84,6 +86,14 @@ Real analyse_track(GpxReader&                 reader,
     static const std::vector<Long> kPeakDurations = {
         5, 15, 30, 60, 300, 600, 1200, 1800, 3600};
     io::print_peaks(peaks::best_efforts(track, pa, kPeakDurations));
+
+    // Durations long enough for fatigue to show, against work levels a long
+    // ride passes through. Short rides drop the thresholds they never reach.
+    static const std::vector<Long> kDurabilityDurations = {60, 300, 1200};
+    static const std::vector<Real> kWorkThresholds      = {0.0, 500.0, 1000.0,
+                                                           1500.0, 2000.0, 2500.0};
+    io::print_durability(
+        durability::analyse(track, pa, kDurabilityDurations, kWorkThresholds));
     io::print_quadrant(quadrant::analyse(track, pa, opts.ftp_w, opts.crank_length_m));
 
     // W'-balance series drives both the match summary and the optional export.
@@ -151,6 +161,7 @@ Real analyse_track(GpxReader&                 reader,
         {"power_measured", opts.acf_power_measured},
         {"hr",             opts.acf_hr},
         {"cadence",        opts.acf_cadence},
+        {"torque",         opts.acf_torque},
     };
     const Bool any_acf = std::any_of(
         acf_requests.begin(), acf_requests.end(),

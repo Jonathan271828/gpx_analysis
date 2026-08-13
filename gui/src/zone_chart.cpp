@@ -134,7 +134,7 @@ void draw_zone_chart(const zones::ZoneTable& table) {
         return;
     }
 
-    const std::string unit = (table.kind == "power") ? "W" : "bpm";
+    const std::string& unit = table.unit;
 
     draw_heading(table);
     const RowLayout l = measure(table, unit);

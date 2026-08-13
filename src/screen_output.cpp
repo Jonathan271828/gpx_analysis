@@ -410,4 +410,42 @@ void print_trends(const std::vector<trends::TrendPoint>& tp) {
     std::cout << "  CTL=fitness, ATL=fatigue, TSB=form (CTL-ATL, entering the day)\n\n";
 }
 
+// ---------------------------------------------------------------------------
+// print_durability — the power-duration curve as work accumulates
+// ---------------------------------------------------------------------------
+
+void print_durability(const durability::Report& r) {
+    if (!r.valid) return;
+
+    std::cout << "=== Fatigue resistance"
+              << (r.measured ? " (measured)" : " (estimated)")
+              << ", over " << std::fixed << std::setprecision(0) << r.total_kj
+              << " kJ ===\n"
+              << "  Best power for each duration, starting only after this much work:\n"
+              << "  " << std::setw(9) << "Duration";
+    for (const Real kj : r.thresholds_kj) {
+        std::ostringstream head;
+        head << std::fixed << std::setprecision(0) << kj << " kJ";
+        std::cout << "  " << std::setw(8) << head.str();
+    }
+    std::cout << "  " << std::setw(7) << "Fade\n";
+
+    for (const durability::Curve& c : r.curves) {
+        std::cout << "  " << std::setw(9) << format_duration(c.duration_s);
+        for (const durability::Effort& e : c.efforts) {
+            std::ostringstream cell;
+            if (e.found) cell << std::fixed << std::setprecision(0) << e.avg_power_w << " W";
+            else         cell << "-";
+            std::cout << "  " << std::setw(8) << cell.str();
+        }
+        std::ostringstream fade;
+        if (c.valid) fade << std::fixed << std::setprecision(1) << std::showpos
+                          << c.fade_pct << " %";
+        else         fade << "-";
+        std::cout << "  " << std::setw(7) << fade.str() << "\n";
+    }
+    std::cout << "  Fade is the drop from the freshest column to the deepest one "
+                 "reached;\n"
+                 "  a large fade at long durations is the signature that matters.\n\n";
+}
 } // namespace io

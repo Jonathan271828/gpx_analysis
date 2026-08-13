@@ -4,6 +4,7 @@
 #include "arg_parser.hpp"   // arg_parser::Options
 #include "channels.hpp"     // channels::extract
 #include "gpx_reader.hpp"   // GpxReader, Track, PowerAnalysis
+#include "durability.hpp" // durability::analyse
 #include "peaks.hpp"        // peaks::best_efforts
 #include "wind.hpp"         // wind::obtain
 #include "zones.hpp"        // zones::power_zones
@@ -344,7 +345,8 @@ void collect_chart_data(const arg_parser::Options& opts, Result& result) {
         const PowerAnalysis pa = reader.estimate_power(opts.power, i, wp);
         TrackCharts&        tc = result.tracks[i];
 
-        tc.power_zones = zones::power_zones(tracks[i], pa, opts.ftp_w);
+        tc.power_zones   = zones::power_zones(tracks[i], pa, opts.ftp_w);
+        tc.cadence_zones = zones::cadence_zones(tracks[i], pa);
         tc.ftp_w       = opts.ftp_w;
         tc.channels    = channels::extract(tracks[i], reader.compute_stats(i), pa);
 
@@ -369,6 +371,14 @@ void collect_chart_data(const arg_parser::Options& opts, Result& result) {
             b.zone           = zone_of(e.avg_power_w, tc.power_zones);
             tc.peaks.push_back(b);
         }
+
+        // The same durations and work levels app.cpp reports, so the chart and
+        // the table above it are the same numbers.
+        static const std::vector<Long> kDurabilityDurations = {60, 300, 1200};
+        static const std::vector<Real> kWorkThresholds      = {0.0, 500.0, 1000.0,
+                                                               1500.0, 2000.0, 2500.0};
+        tc.durability = durability::analyse(tracks[i], pa, kDurabilityDurations,
+                                            kWorkThresholds);
 
         std::vector<Hill> hills = reader.detect_hills(i);
         reader.attach_climb_power(hills, pa);

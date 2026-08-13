@@ -45,7 +45,8 @@ struct Options {
     std::string acf_power;                  /**< --acf-power output path. */
     std::string acf_power_measured;         /**< --acf-power-measured output path. */
     std::string acf_hr;                     /**< --acf-hr output path. */
-    std::string acf_cadence;                /**< --acf-cadence output path. */
+    std::string acf_cadence;
+    std::string acf_torque;         /**< --acf-torque output path. */                /**< --acf-cadence output path. */
     Real        acf_dt = 0.0;               /**< --acf-dt: resample interval (s); 0 = auto. */
 
     wind::Mode  wind_mode = wind::Mode::Off; /**< --wind / --wind-cache / --wind-file. */

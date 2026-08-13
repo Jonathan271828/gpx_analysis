@@ -47,6 +47,7 @@ void print_usage(const Char* prog, std::ostream& os) {
        << "  --acf-power-measured F measured <power>                    -> F\n"
        << "  --acf-hr F             heart rate                          -> F\n"
        << "  --acf-cadence F        cadence (rpm)                       -> F\n"
+       << "  --acf-torque F         crank torque (Nm)                   -> F\n"
        << "  --acf-dt S             uniform resample interval in s (default: auto = median)\n"
        << "\nWind (Open-Meteo historical API; improves the aero term):\n"
        << "  --wind           fetch historical wind and apply it\n"
@@ -135,6 +136,8 @@ Bool parse(Int argc, Char* argv[], Options& opts, std::string& error) {
             opts.acf_hr = argv[++i];
         } else if (arg == "--acf-cadence" && i + 1 < argc) {
             opts.acf_cadence = argv[++i];
+        } else if (arg == "--acf-torque" && i + 1 < argc) {
+            opts.acf_torque = argv[++i];
         } else if (arg == "--acf-dt" && i + 1 < argc) {
             opts.acf_dt = std::atof(argv[++i]);
         } else if (arg == "--wind") {

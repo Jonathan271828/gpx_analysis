@@ -68,8 +68,10 @@ private:
     void draw_report();
     void draw_track_selector();
     void draw_zone_panel(float width);
+    void draw_cadence_zone_panel(float width);
     void draw_hill_panel(float width);
     void draw_peaks_panel(float width);
+    void draw_durability_panel(float width);
 
     float draw_spectral_controls();
     void  draw_channel_picker();

@@ -38,6 +38,7 @@ add_executable(gpx_reader
     src/cp_model.cpp
     src/trends.cpp
     src/peaks.cpp
+    src/durability.cpp
     src/quadrant.cpp
 )
 

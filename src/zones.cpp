@@ -32,6 +32,7 @@ std::string watts(Real w) { return std::to_string(static_cast<int>(w + 0.5)); }
 ZoneTable power_zones(const Track& track, const PowerAnalysis& pa, Real ftp_w) {
     ZoneTable z;
     z.kind = "power";
+    z.unit = "W";
     if (!pa.stats.valid || ftp_w <= 0.0) return z;
 
     const auto& pts = track.points;
@@ -73,6 +74,7 @@ ZoneTable hr_zones(const Track& track, const PowerAnalysis& pa,
                    Real lthr, Real max_hr) {
     ZoneTable z;
     z.kind = "heart rate";
+    z.unit = "bpm";
 
     const auto& pts = track.points;
     const Size  n   = pts.size();
@@ -110,6 +112,48 @@ ZoneTable hr_zones(const Track& track, const PowerAnalysis& pa,
         if (dt <= 0 || dt > STOP_S) continue;
         if (!pts[i].has_hr) continue;
         bucket(z.zones, static_cast<Real>(pts[i].hr), static_cast<Real>(dt));
+        z.total_s += static_cast<Real>(dt);
+    }
+
+    z.valid = z.total_s > 0.0;
+    return z;
+}
+
+// ---------------------------------------------------------------------------
+// cadence_zones — absolute rpm bands
+// ---------------------------------------------------------------------------
+
+ZoneTable cadence_zones(const Track& track, const PowerAnalysis& pa) {
+    ZoneTable z;
+    z.kind  = "cadence";
+    z.unit  = "rpm";
+    z.basis = "absolute rpm";
+
+    const auto& pts = track.points;
+    const Size  n   = pts.size();
+    if (pa.t_offset_s.size() != n) return z;
+
+    // Below this the rider is freewheeling rather than turning the pedals, and
+    // the time belongs to no band: a long descent would otherwise dominate.
+    constexpr Int  COASTING_RPM = 1;
+
+    struct Def { const char* label; Real lo; Real hi; };
+    constexpr std::array<Def, 6> defs{{
+        {"Grinding",    1.0,  60.0},
+        {"Low",        60.0,  75.0},
+        {"Moderate",   75.0,  85.0},
+        {"Endurance",  85.0,  95.0},
+        {"Brisk",      95.0, 105.0},
+        {"Spinning",  105.0,  -1.0},
+    }};
+    for (const Def& d : defs) z.zones.push_back({d.label, d.lo, d.hi, 0.0});
+
+    for (Size i = 1; i < n; ++i) {
+        if (pa.t_offset_s[i] < 0 || pa.t_offset_s[i - 1] < 0) continue;
+        const Long dt = pa.t_offset_s[i] - pa.t_offset_s[i - 1];
+        if (dt <= 0 || dt > STOP_S) continue;
+        if (!pts[i].has_cad || pts[i].cad < COASTING_RPM) continue;
+        bucket(z.zones, static_cast<Real>(pts[i].cad), static_cast<Real>(dt));
         z.total_s += static_cast<Real>(dt);
     }
 

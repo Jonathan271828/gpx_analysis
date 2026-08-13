@@ -1,5 +1,6 @@
 #include "file_view.hpp"
 
+#include "durability_chart.hpp"
 #include "panel.hpp"
 #include "paths.hpp"
 #include "signal_view.hpp"
@@ -51,7 +52,7 @@ std::size_t section_end(const std::string& report, const std::string& header) {
 constexpr float kAxisLabelGutter = 10.0f;
 
 /// Which chart a cut in the report text calls for.
-enum class ReportChart { Hills, Zones, Peaks };
+enum class ReportChart { Hills, Zones, Cadence, Peaks, Durability };
 
 /// A point in the report text, and the chart that belongs there.
 struct ChartCut {
@@ -68,7 +69,9 @@ std::vector<ChartCut> find_chart_cuts(const std::string& report) {
     static const std::pair<const char*, ReportChart> kSections[] = {
         {"--- Hills",                ReportChart::Hills},
         {"=== Time in power zones",  ReportChart::Zones},
+        {"=== Time in cadence zones", ReportChart::Cadence},
         {"=== Peak power efforts",   ReportChart::Peaks},
+        {"=== Fatigue resistance",   ReportChart::Durability},
     };
 
     std::vector<ChartCut> cuts;
@@ -386,16 +389,33 @@ void FileView::draw_psd_tab() {
 // The zone chart, in a panel of its own. `width` is passed in rather than taken
 // from the content region: the report page scrolls horizontally for the wide
 // text tables, and the panel should follow the visible width, not that.
-void FileView::draw_zone_panel(float width) {
-    if (result_.tracks.empty()) return;
+namespace {
 
-    const zones::ZoneTable& table =
-        result_.tracks[static_cast<Size>(track_)].power_zones;
+// Both zone panels differ only in which table they draw, so the sizing and the
+// panel scaffolding live here rather than twice.
+void draw_zone_table_panel(const char* id, const zones::ZoneTable& table,
+                           float width) {
+    if (!table.valid) return;
+
     const float height = zone_chart_height(table) + PanelScope::chrome_height() +
                          ImGui::GetStyle().ItemSpacing.y * 2.0f;
 
-    const PanelScope panel("zones", ImVec2(width, height));
+    const PanelScope panel(id, ImVec2(width, height));
     draw_zone_chart(table);
+}
+
+} // namespace
+
+void FileView::draw_zone_panel(float width) {
+    if (result_.tracks.empty()) return;
+    draw_zone_table_panel("zones",
+                          result_.tracks[static_cast<Size>(track_)].power_zones, width);
+}
+
+void FileView::draw_cadence_zone_panel(float width) {
+    if (result_.tracks.empty()) return;
+    draw_zone_table_panel("cadence_zones",
+                          result_.tracks[static_cast<Size>(track_)].cadence_zones, width);
 }
 
 void FileView::draw_peaks_panel(float width) {
@@ -431,6 +451,20 @@ void FileView::draw_peaks_panel(float width) {
 }
 
 // One elevation profile per detected climb, with a shared x-axis choice.
+void FileView::draw_durability_panel(float width) {
+    if (result_.tracks.empty()) return;
+
+    const durability::Report& report =
+        result_.tracks[static_cast<Size>(track_)].durability;
+    if (!report.valid) return;
+
+    const float height = durability_chart_height() + PanelScope::chrome_height() +
+                         ImGui::GetStyle().ItemSpacing.y * 3.0f;
+
+    const PanelScope panel("durability", ImVec2(width, height));
+    draw_durability_chart(report, ImGui::GetContentRegionAvail().x - kAxisLabelGutter);
+}
+
 void FileView::draw_hill_panel(float width) {
     if (result_.tracks.empty()) return;
 
@@ -525,8 +559,10 @@ void FileView::draw_report() {
         ImGui::TextUnformatted(r.c_str() + pos, r.c_str() + cut.at);
         switch (cut.chart) {
             case ReportChart::Hills: draw_hill_panel(page_w);  break;
-            case ReportChart::Zones: draw_zone_panel(page_w);  break;
-            case ReportChart::Peaks: draw_peaks_panel(page_w); break;
+            case ReportChart::Zones:   draw_zone_panel(page_w);         break;
+            case ReportChart::Cadence: draw_cadence_zone_panel(page_w); break;
+            case ReportChart::Peaks:      draw_peaks_panel(page_w);      break;
+            case ReportChart::Durability: draw_durability_panel(page_w); break;
         }
         pos = cut.at;
     }

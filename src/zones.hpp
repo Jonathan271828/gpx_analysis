@@ -25,7 +25,8 @@ struct Zone {
 /** @brief A full zone distribution (power or heart rate). */
 struct ZoneTable {
     Bool              valid = false;  /**< True if any time was accumulated. */
-    std::string       kind;           /**< "power" or "heart rate". */
+    std::string       kind;           /**< "power", "heart rate" or "cadence". */
+    std::string       unit;           /**< Unit of the bounds: "W", "bpm", "rpm". */
     std::string       basis;          /**< e.g. "FTP 305 W" or "LTHR 165 bpm". */
     Real              total_s = 0.0;  /**< Total time across all zones (s). */
     std::vector<Zone> zones;          /**< The zones in ascending order. */
@@ -51,5 +52,21 @@ ZoneTable power_zones(const Track& track, const PowerAnalysis& pa, Real ftp_w);
  */
 ZoneTable hr_zones(const Track& track, const PowerAnalysis& pa,
                    Real lthr, Real max_hr);
+
+/**
+ * @brief Cadence distribution: time spent in each band of pedalling rate.
+ *
+ * Unlike power and heart rate, cadence has no per-rider reference to scale
+ * against -- 90 rpm is 90 rpm whoever is pedalling -- so the bands are absolute
+ * and describe how the work was delivered rather than how hard it was. Coasting
+ * is excluded: a freewheeling descent reports 0 rpm, and counting that as
+ * "grinding" would swamp the distribution of the pedalling that actually
+ * happened.
+ *
+ * @param track The track to analyse.
+ * @param pa    Power analysis (supplies per-step timestamps).
+ * @return The zone table; valid == false if the track carries no cadence.
+ */
+ZoneTable cadence_zones(const Track& track, const PowerAnalysis& pa);
 
 } // namespace zones

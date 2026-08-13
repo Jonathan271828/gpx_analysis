@@ -14,6 +14,7 @@
 #include "splits.hpp"       // Split
 #include "cp_model.hpp"     // CpFit, MatchStats
 #include "trends.hpp"       // TrendPoint
+#include "durability.hpp"
 #include "peaks.hpp"        // PeakEffort
 #include "quadrant.hpp"     // Quadrants
 
@@ -48,6 +49,13 @@ void print_cp(const cp::CpFit& f);
 void print_matches(const cp::MatchStats& m);
 /** @brief Print the peak-power efforts table. */
 void print_peaks(const std::vector<peaks::PeakEffort>& pk);
+
+/**
+ * @brief Print the fatigue-resistance table: best power per duration at each
+ *        level of accumulated work, and the fade across it.
+ * @param r The report; nothing is printed when it is invalid.
+ */
+void print_durability(const durability::Report& r);
 /** @brief Print the quadrant analysis (force × cadence). */
 void print_quadrant(const quadrant::Quadrants& q);
 /** @brief Print the multi-ride training trend (CTL / ATL / TSB). */

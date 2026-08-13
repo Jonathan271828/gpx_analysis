@@ -133,6 +133,7 @@ add_executable(gpxana_gui
     src/paths.cpp
     src/panel.cpp
     src/bar_row.cpp
+    src/durability_chart.cpp
     src/palette.cpp
     src/zone_chart.cpp
     src/hill_chart.cpp

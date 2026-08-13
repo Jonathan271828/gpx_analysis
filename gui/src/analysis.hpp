@@ -9,6 +9,7 @@
 /// therefore shows up in the GUI with no change here.
 
 #include "channels.hpp"   // channels::Channel
+#include "durability.hpp" // durability::Report
 #include "zones.hpp"      // zones::ZoneTable
 
 #include <cstddef>
@@ -86,9 +87,11 @@ struct DistanceAxis {
 
 /// @brief Everything chartable about one track.
 struct TrackCharts {
-    zones::ZoneTable         power_zones;   ///< Time-in-zone distribution.
+    zones::ZoneTable         power_zones;   ///< Time-in-power-zone distribution.
+    zones::ZoneTable         cadence_zones; ///< Time-in-cadence-band distribution.
     std::vector<HillProfile> hills;         ///< One entry per detected climb.
     std::vector<PeakBar>     peaks;         ///< Mean-maximal power curve.
+    durability::Report       durability;    ///< Power decay as work accumulates.
     Real                     ftp_w = 0.0;   ///< FTP the analysis ran with (W).
 
     /// The per-sample series the track carries (velocity, power, heart rate,
