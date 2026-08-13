@@ -581,7 +581,7 @@ latitude, $\lambda$ longitude and $R$ the Earth's radius, the central angle
 $\Delta\sigma$ between two points and the arc length between them are
 
 $$
-a = \sin^2\frac{\Delta\varphi}{2} + \cos\varphi_1\cos\varphi_2\sin^2\frac{\Delta\lambda}{2}
+a = \sin^{2}\left(\frac{\Delta\varphi}{2}\right) + \cos(\varphi_1)\cos(\varphi_2)\sin^{2}\left(\frac{\Delta\lambda}{2}\right)
 $$
 
 $$
@@ -593,8 +593,8 @@ $$
 The initial bearing, used to project wind onto the direction of travel:
 
 $$
-\theta = \mathrm{atan2}\bigl(\sin\Delta\lambda\cos\varphi_2,\ \
-\cos\varphi_1\sin\varphi_2 - \sin\varphi_1\cos\varphi_2\cos\Delta\lambda\bigr)
+\theta = \mathrm{atan2}\bigl(\sin(\Delta\lambda)\cos(\varphi_2),\ \
+\cos(\varphi_1)\sin(\varphi_2) - \sin(\varphi_1)\cos(\varphi_2)\cos(\Delta\lambda)\bigr)
 $$
 
 $$
@@ -616,8 +616,8 @@ airspeed; all are referred to the pedals through the drivetrain efficiency
 $\eta$:
 
 $$
-P = \frac{v}{\eta}\Bigl( \underbrace{mg\sin\theta}_{\text{gravity}}
-+ \underbrace{mg C_{\mathrm{rr}}\cos\theta}_{\text{rolling}}
+P = \frac{v}{\eta}\Bigl( \underbrace{mg\sin(\theta)}_{\text{gravity}}
++ \underbrace{mg C_{\mathrm{rr}}\cos(\theta)}_{\text{rolling}}
 + \underbrace{ma}_{\text{inertia}}
 + \underbrace{\tfrac{1}{2}\rho C_{\mathrm d}A\frac{(v + v_{\mathrm{hw}})^{2}}{v}}_{\text{aerodynamic}} \Bigr)
 $$
@@ -803,7 +803,7 @@ The crosshair dividing the quadrants sits at FTP delivered at 90 rpm.
 
 ### Training trend
 
-*Fuller discussion: [Multi-ride trend (CTL / ATL / TSB)](#multi-ride-trend-ctl-atl-tsb).*
+*Fuller discussion: [Multi-ride trend (CTL / ATL / TSB)](#multi-ride-trend-ctl--atl--tsb).*
 
 Two exponentially weighted moving averages of daily TSS, with rest days entering
 as zero. Each is the exact discretisation, at unit time step, of a first-order
@@ -823,7 +823,7 @@ rider carried into that day.
 
 ### Spectra
 
-*Fuller discussion: [Autocorrelation and power spectrum](#autocorrelation-power-spectrum).*
+*Fuller discussion: [Autocorrelation and power spectrum](#autocorrelation--power-spectrum).*
 
 The channel is resampled onto a uniform grid of spacing $\Delta t$, the mean
 removed, and zero-padded from its resampled length $M$ to $N \ge 2M$, so that
