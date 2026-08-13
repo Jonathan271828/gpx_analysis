@@ -46,3 +46,12 @@ target_link_libraries(gpx_reader PRIVATE
     nlohmann_json::nlohmann_json
 )
 target_include_directories(gpx_reader PRIVATE src)
+
+# Optional GUI (Dear ImGui + ImPlot). Off by default, so the command-line build
+# above is untouched: nothing extra is downloaded and no GUI dependency is
+# resolved. Everything the GUI needs lives in gui/. Enable with:
+#   cmake -S . -B build -DGPXANA_BUILD_GUI=ON
+option(GPXANA_BUILD_GUI "Build the ImGui/ImPlot GUI (gpxana_gui)" OFF)
+if(GPXANA_BUILD_GUI)
+    add_subdirectory(gui)
+endif()

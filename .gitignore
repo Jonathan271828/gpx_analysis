@@ -1,5 +1,7 @@
 build/
+build-gui/
 docs/
+external/
 *.gpx
 Install/
 Knowledge/
