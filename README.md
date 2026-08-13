@@ -31,6 +31,8 @@ time window.
 - Critical-power model (CP and W') with an optional W'-balance export
 - Multi-ride training trend (CTL / ATL / TSB) when several files are given
 - Multiple `--dist` and `--time` queries supported in a single run
+- Optional desktop GUI (Dear ImGui + ImPlot): the same report with the tables
+  charted, plus interactive autocorrelation and power-spectrum views
 
 ## Requirements
 
@@ -42,6 +44,18 @@ time window.
 - The `curl` command-line tool on `PATH` — only needed at runtime for the
   optional `--wind` fetch (no libcurl dev package required)
 
+Only for the optional GUI (`-DGPXANA_BUILD_GUI=ON`):
+
+- OpenGL and X11 development headers (on Debian/Ubuntu:
+  `libgl1-mesa-dev xorg-dev`)
+- [GLFW](https://www.glfw.org/) >= 3.3 — a system install is used when CMake
+  finds one, otherwise 3.5.1 is built automatically
+- [Dear ImGui](https://github.com/ocornut/imgui) and
+  [ImPlot](https://github.com/epezent/implot), fetched automatically
+
+  These are downloaded once into `external/` (git-ignored) and reused, so they
+  survive `rm -rf build`. The default command-line build resolves none of them.
+
 ## Building
 
 ```bash
@@ -52,10 +66,22 @@ cmake --build build --parallel
 
 The binary is placed at `build/gpx_reader`.
 
+To build the GUI as well, turn its option on. It is off by default, so the
+command-line build above never resolves a GUI dependency:
+
+```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DGPXANA_BUILD_GUI=ON
+cmake --build build --parallel
+```
+
+That adds `build/gpxana_gui` alongside `build/gpx_reader`. Nothing under `src/`
+changes: `gui/` compiles the analysis code into a static library and draws on
+top of it.
+
 ## API documentation
 
-The source is documented with Doxygen comments in the header files. Generate the
-HTML reference with:
+The source is documented with Doxygen comments in the header files (both `src/`
+and `gui/src/`). Generate the HTML reference with:
 
 ```bash
 doxygen Doxyfile      # output in docs/html/index.html
@@ -198,6 +224,80 @@ Total: 4 hills
   End        : 2026-03-31T11:23:54.000Z  (lat=48.227416, lon=16.304194)
   Point idx  : 5438 -> 5738
 ```
+
+## GUI
+
+`gpxana_gui` is an optional desktop front-end (Dear ImGui + ImPlot on
+GLFW/OpenGL). It reimplements no analysis: it builds the same options the
+command line does, calls the same `app::run()`, and captures the report you
+would have got on stdout — so any section added to the analysis appears in the
+GUI without a change on the GUI side. The charts are the same numbers as
+structs rather than as text.
+
+```bash
+./build/gpxana_gui                      # then use the Load button
+./build/gpxana_gui rides/morning.gpx    # or open a file straight away
+```
+
+A `.gpx` file can also be dragged onto the window.
+
+### Toolbar
+
+| Control | What it does |
+|---|---|
+| `Load GPX...` | Native file chooser (via `zenity`). Without it, a path box appears instead. |
+| `Reload` | Re-run the analysis on the current file. |
+| `Copy report` | Put the whole text report on the clipboard. |
+| `track points` | How many points the report lists first — mirrors `--points`. |
+| `wind` | Fetch historical wind and apply it, exactly as `--wind` does. Off by default; it is the only control that reaches the network. |
+
+### Report tab
+
+The full text report in one scrolling page, with a chart placed directly below
+the table it illustrates:
+
+- **Time in power zones** — horizontal bars, one per zone, scaled to the largest
+  zone so short ones stay visible; the printed percentages carry the true
+  proportions.
+- **Peak power efforts** — one bar per duration, shortest to longest, so the
+  bars fall away as the power-duration staircase. Each is coloured by the zone
+  it lands in, with the zone named beside it. Below it the same efforts read the
+  other way round: how long each fraction of your power was held, against
+  either the ride's best effort or FTP.
+- **Climbs** — one elevation profile per detected climb, shaded by the power
+  zone each stretch was ridden in, with distance or time on the x axis.
+
+Files with several tracks get a selector that switches every chart on the page.
+
+### Autocorrelation and Power spectrum tabs
+
+Both are computed on demand from the ride's channels (velocity, estimated
+power, measured power, heart rate, cadence) by the same `signal::compute_acf_psd`
+the `--acf-*` flags use, so the plots and those files carry the same numbers.
+
+Tick the channels you want, optionally set the resample interval (`0` = auto,
+mirroring `--acf-dt`), and press `Compute`.
+
+Two more controls sit alongside, for tying the plots to the exported files:
+
+| Control | What it does |
+|---|---|
+| `Plot file` | Plot columns 3 and 4 of a `.acf.dat` written by `--acf-*`, exactly as they stand — nothing is recomputed. It adds to what is already shown, so a stored spectrum and a freshly computed one can be compared side by side. Useful for a file produced under options the GUI cannot reproduce (a different mass or CdA). |
+| `Dump to .dat` | Write the computed spectra beside the GPX as `<channel>.gui.acf.dat`, in the same 4-column format `--acf-*` produces, so the two can be diffed rather than compared by eye. |
+
+- **Autocorrelation** — every channel on shared axes, since all are
+  dimensionless and start at 1, with a zero line marking where a signal stops
+  resembling itself. Opens on the first 10 minutes of lag, where the structure
+  is; a checkbox shows the whole range.
+- **Power spectrum** — one plot per channel, because each is in its own units
+  squared per hertz. Linear axes over the full frequency range, drawing the same
+  points as `plot 'x.acf.dat' u 3:4 w l`.
+
+Hovering either plot shows where the cursor is, in that plot's units — lag and
+autocorrelation on one, frequency and spectral density on the other. The
+frequency readout carries the period alongside, in the same units as the
+autocorrelation tab's lag axis, so a feature can be matched between the two
+tabs without arithmetic.
 
 ## Output reference
 
@@ -658,7 +758,21 @@ detection and fastest-segment queries are run independently for each track.
 
 ```
 .
-├── CMakeLists.txt       Build definition; fetches pugixml v1.14 via FetchContent
+├── CMakeLists.txt       Build definition; fetches pugixml v1.14 via FetchContent.
+│                        GPXANA_BUILD_GUI (default OFF) adds gui/
+├── gui/                 Optional GUI; nothing under src/ is modified
+│   ├── CMakeLists.txt   Compiles src/ as a static lib, fetches ImGui/ImPlot/GLFW
+│   └── src/
+│       ├── main.cpp          Window, OpenGL context and frame loop
+│       ├── app_window.hpp/.cpp  The window's contents and the state behind them
+│       ├── analysis.hpp/.cpp    Runs app::run(), captures the report, collects
+│       │                        the chart data (namespace gui)
+│       ├── spectral_view.hpp/.cpp  Autocorrelation and power-spectrum plots
+│       ├── peaks_chart.hpp/.cpp    Peak-effort bars and the hold curve
+│       ├── zone_chart.hpp/.cpp     Time-in-zone bars
+│       ├── hill_chart.hpp/.cpp     Per-climb elevation profiles
+│       ├── palette.hpp/.cpp        Shared zone/series colours
+│       └── file_dialog.hpp/.cpp    Native open dialog (via zenity)
 └── src/
     ├── types.hpp       Project-wide scalar type aliases (Real, Int, Size, ...)
     ├── arg_parser.hpp   Options struct + parse()/print_usage() (namespace arg_parser)
