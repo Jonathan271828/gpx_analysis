@@ -126,6 +126,7 @@ add_executable(gpxana_gui
     src/compare_view.cpp
     src/analysis.cpp
     src/file_dialog.cpp
+    src/settings_dialog.cpp
     src/window.cpp
     src/format.cpp
     src/signal_view.cpp

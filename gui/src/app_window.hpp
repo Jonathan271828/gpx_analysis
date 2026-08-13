@@ -5,6 +5,7 @@
 
 #include "compare_view.hpp"
 #include "file_view.hpp"
+#include "settings_dialog.hpp"
 #include "span.hpp"
 
 #include <string>
@@ -36,6 +37,7 @@ public:
 private:
     /// @brief The load button, the analysis settings, and Reload.
     void draw_toolbar();
+    void draw_settings_button();
 
     /// @brief One tab per open file, plus the comparison, which is pinned to
     /// the end so it keeps its place as file tabs are reordered and closed.
@@ -64,6 +66,8 @@ private:
     /// it stays opt-in. Toggling it re-runs every open file, because the
     /// headwind term changes estimated power and everything derived from it.
     bool wind_on_ = false;
+
+    SettingsEditor settings_;  ///< Editor for the persistent defaults.
 
     /// What the comparison lines the rides up by. Distance by default: the
     /// question it usually answers is how two attempts at the same road differ,

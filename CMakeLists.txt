@@ -25,6 +25,7 @@ add_executable(gpx_reader
     src/main.cpp
     src/app.cpp
     src/arg_parser.cpp
+    src/config.cpp
     src/io_base.cpp
     src/screen_output.cpp
     src/file_output.cpp

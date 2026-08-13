@@ -3,6 +3,7 @@
 #include "compare_view.hpp"
 #include "file_dialog.hpp"
 #include "palette.hpp"
+#include "settings_dialog.hpp"
 #include "theme.hpp"
 
 #include "imgui.h"
@@ -57,6 +58,9 @@ void AppWindow::draw() {
         draw_toolbar();
         ImGui::Separator();
         draw_file_tabs();
+
+        // Saved settings change every open ride's numbers, so all are re-run.
+        if (draw_settings_dialog(settings_)) reload_all();
     }
     ImGui::End();
 }
@@ -116,6 +120,16 @@ void AppWindow::draw_file_tabs() {
         files_.erase(files_.begin() + closed);
         if (active_ > closed) --active_;
     }
+}
+
+// Opens the editor for the persistent defaults. Offered whether or not a file
+// is loaded, since the settings describe the rider rather than any one ride.
+void AppWindow::draw_settings_button() {
+    ImGui::SameLine();
+    if (ImGui::Button("Settings...")) open_settings(settings_);
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Threshold power, weight, aerodynamics and the rest,\n"
+                          "kept in a config file the command line reads too.");
 }
 
 void AppWindow::draw_compare_tab() {
@@ -221,6 +235,8 @@ void AppWindow::draw_toolbar() {
     ImGui::SameLine();
     ImGui::TextDisabled("(%zu file%s open)", files_.size(),
                         files_.size() == 1 ? "" : "s");
+
+    draw_settings_button();
 }
 
 } // namespace gui

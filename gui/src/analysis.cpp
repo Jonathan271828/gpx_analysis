@@ -3,6 +3,7 @@
 #include "app.hpp"          // app::run
 #include "arg_parser.hpp"   // arg_parser::Options
 #include "channels.hpp"     // channels::extract
+#include "config.hpp"      // config::load_args
 #include "gpx_reader.hpp"   // GpxReader, Track, PowerAnalysis
 #include "durability.hpp" // durability::analyse
 #include "peaks.hpp"        // peaks::best_efforts
@@ -402,8 +403,17 @@ Result analyse(const std::string& gpx_path, std::size_t max_print,
     // miss the defaults parse() resolves itself -- the physics mass, for one,
     // is rider + bike (80.3 kg), not PowerParams' own 80.0 kg default -- and
     // would silently drift from the CLI as more defaults are added.
-    std::vector<std::string> args = {
-        "gpxana_gui", gpx_path, "--points", std::to_string(max_print)};
+    std::vector<std::string> args = {"gpxana_gui"};
+
+    // The persistent defaults first, so anything the window sets below still
+    // wins: arg_parser assigns as it scans, and the last occurrence survives.
+    std::string cfg_err;
+    for (std::string& a : config::load_args(config::default_path(), cfg_err))
+        args.push_back(std::move(a));
+
+    args.push_back(gpx_path);
+    args.push_back("--points");
+    args.push_back(std::to_string(max_print));
 
     // Goes in as the flag the command line parses, so wind_mode is resolved by
     // the same code and the report matches a `--wind` run exactly.
