@@ -469,24 +469,15 @@ marked invalid and a notice is printed.
 ## Power estimation
 
 Power is estimated from the track kinematics using the same physics model
-Strava uses (the Martin et al. 1998 road-cycling model). For each step, power at
-the pedals is the sum of four resistive forces multiplied by ground speed,
-divided by drivetrain efficiency:
+Strava uses (the Martin *et al.* 1998 road-cycling model): gravity, rolling
+resistance, inertia and aerodynamic drag, referred to the pedals through the
+drivetrain efficiency. The equation is under
+[Models and equations](#power); this section covers the parameters it takes and
+what the estimate is worth.
 
-```
-P = (1/η) · [ P_gravity + P_rolling + P_aero + P_accel ]
-
-P_gravity = m · g · sin(θ) · v          (climbing)
-P_rolling = m · g · cos(θ) · Crr · v    (rolling resistance)
-P_aero    = ½ · ρ · CdA · (v + v_hw)² · v   (air resistance)
-P_accel   = m · a · v                   (acceleration)
-```
-
-where `θ = atan(grade)`, `v` = ground speed, `a` = acceleration and `v_hw` = the
-headwind component. `v` is the rider's speed over the ground; `(v + v_hw)` is the
-airspeed the drag force depends on. Without `--wind` there is no wind data, so
-`v_hw = 0` and the aero term reduces to `½·ρ·CdA·v³`; see [Wind](#wind) for how
-it is obtained and projected onto the direction of travel.
+Without `--wind` there is no wind data, so the airspeed reduces to the ground
+speed; see [Wind](#wind) for how it is obtained and projected onto the direction
+of travel.
 
 | Parameter | Default | Notes |
 |---|---|---|
@@ -514,11 +505,8 @@ accurate on sustained climbs where gravity dominates.
 
 Wind is fetched from the **[Open-Meteo Historical Weather API](https://open-meteo.com/en/docs/historical-weather-api)**
 (free, no API key, ERA5 reanalysis) and folded into the aerodynamic term via the
-headwind component `v_hw`:
-
-```
-v_hw = wind_speed · cos(wind_from_direction − rider_heading)
-```
+headwind component $v_{\mathrm{hw}}$, whose projection is given under
+[Models and equations](#power).
 
 The rider heading is the GPS bearing between consecutive points; the wind
 direction is Open-Meteo's meteorological "blows from" bearing. A wind from ahead
@@ -577,39 +565,47 @@ gnuplot -p -e "set logscale xy; plot 'power.txt' using 3:4 with lines" # PSD
 
 ## Models and equations
 
-Every model the tool uses, with the constants it actually uses them with.
-Section links go to the fuller discussion.
+Every model the tool uses. The equations are written free of units, as they
+should be — they hold in any consistent system; the values the tool substitutes
+into them, with their units, are tabulated separately. Section links go to the
+fuller discussion.
 
-Throughout, a ride is a sequence of samples $i$ with elapsed times $t_i$; all
-integrals below are evaluated as rectangular sums over the sample intervals
-$\Delta t_i = t_i - t_{i-1}$, and steps with $\Delta t_i$ above the stop
-threshold are excluded rather than interpolated across.
+A ride is a sequence of samples $i$ at elapsed times $t_i$. Every integral below
+is evaluated as a rectangular sum over the sample intervals
+$\Delta t_i = t_i - t_{i-1}$, and steps longer than the stop threshold are
+excluded rather than interpolated across.
 
 ### Geometry
 
-Distances are horizontal (2D); elevation never enters a distance.
+Distances are horizontal; elevation never enters a distance. With $\varphi$
+latitude, $\lambda$ longitude and $R$ the Earth's radius,
 
 $$
 a = \sin^2\!\frac{\Delta\varphi}{2} + \cos\varphi_1\cos\varphi_2\,\sin^2\!\frac{\Delta\lambda}{2},
 \qquad
-d = 2R\,\operatorname{atan2}\!\left(\sqrt{a},\,\sqrt{1-a}\right),
-\qquad R = 6\,371\,\mathrm{km}
+d = 2R\,\mathrm{atan2}\!\left(\sqrt{a},\,\sqrt{1-a}\right)
 $$
 
 The initial bearing, used to project wind onto the direction of travel:
 
 $$
-\theta = \operatorname{atan2}\!\big(\sin\Delta\lambda\,\cos\varphi_2,\;
+\theta = \mathrm{atan2}\!\big(\sin\Delta\lambda\,\cos\varphi_2,\;
 \cos\varphi_1\sin\varphi_2 - \sin\varphi_1\cos\varphi_2\cos\Delta\lambda\big)
 $$
 
 $$
-\text{grade} = \frac{\Delta h}{d}\quad (d \ge 1\,\mathrm{m}),
+\mathrm{grade} = \frac{\Delta h}{d},
 \qquad
-\mathrm{VAM} = \frac{\sum \Delta h^{+}}{T}\ \left[\mathrm{m\,h^{-1}}\right]
+\mathrm{VAM} = \frac{1}{T}\sum_i \max(\Delta h_i,\,0)
 $$
 
-### Power — [details](#power-estimation)
+$R = 6371\ \mathrm{km}$; gradients are computed only for steps with
+$d \ge 1\ \mathrm{m}$, below which GPS noise dominates the quotient. VAM is
+conventionally quoted in metres per hour.
+
+### Power
+
+*Fuller discussion: [Power](#power-estimation).*
 
 Martin *et al.* (1998). Three terms scale with ground speed $v$ and one with
 airspeed; all are referred to the pedals through the drivetrain efficiency
@@ -622,16 +618,16 @@ P = \frac{1}{\eta}\left[
 \underbrace{ma}_{\text{inertia}}
 \right] v
 \;+\;
-\frac{1}{\eta}\underbrace{\tfrac{1}{2}\rho\,C_{\mathrm d}A\,(v + v_{\mathrm{hw}})^{2}\,v}_{\text{aerodynamic}}
+\frac{1}{\eta}\underbrace{\frac{1}{2}\rho\,C_{\mathrm d}A\,(v + v_{\mathrm{hw}})^{2}\,v}_{\text{aerodynamic}}
 $$
 
-with $\theta = \arctan(\text{grade})$ and $v_{\mathrm{hw}}$ the headwind
+with $\theta = \arctan(\mathrm{grade})$ and $v_{\mathrm{hw}}$ the headwind
 component, positive into the rider. Note the asymmetry: the drag *force* goes as
-airspeed squared, but the *power* delivered to the ground goes as that force
-times ground speed, not airspeed.
+airspeed squared, but the *power* delivered to the ground is that force times
+ground speed, not airspeed.
 
-Air density is not assumed constant. Pressure follows the International Standard
-Atmosphere troposphere, then the ideal gas law closes it with the recorded air
+Air density is not held constant. Pressure follows the International Standard
+Atmosphere troposphere; the ideal gas law then closes it with the recorded air
 temperature:
 
 $$
@@ -640,19 +636,25 @@ p(h) = p_0\left(1 - \frac{L\,h}{T_0}\right)^{\,gM/RL},
 \rho = \frac{p}{R_{\mathrm{sp}}\,T}
 $$
 
-$p_0 = 101\,325\,\mathrm{Pa}$, $T_0 = 288.15\,\mathrm{K}$,
-$L = 6.5\times10^{-3}\,\mathrm{K\,m^{-1}}$,
-$R_{\mathrm{sp}} = 287.05\,\mathrm{J\,kg^{-1}K^{-1}}$, and the exponent
-$gM/RL \approx 5.257$. This gives $\rho \approx 1.225\,\mathrm{kg\,m^{-3}}$ at
-sea level and $15\,^\circ\mathrm{C}$. Without a recorded temperature the
-standard $15\,^\circ\mathrm{C}$ is used, so the elevation dependence survives
-even when the thermometer does not.
-
-Wind is projected onto the heading:
+Wind enters only through the projection onto the heading:
 
 $$
 v_{\mathrm{hw}} = w\,\cos\!\left(\theta_{\mathrm{wind}} - \theta_{\mathrm{heading}}\right)
 $$
+
+| Constant | Value | |
+|---|---|---|
+| $p_0$ | 101 325 Pa | ISA sea-level pressure |
+| $T_0$ | 288.15 K | ISA sea-level temperature |
+| $L$ | 6.5 × 10⁻³ K m⁻¹ | tropospheric lapse rate |
+| $R_{\mathrm{sp}}$ | 287.05 J kg⁻¹ K⁻¹ | specific gas constant, dry air |
+| $gM/RL$ | ≈ 5.257 | barometric exponent |
+
+giving $\rho \approx 1.225$ kg m⁻³ at sea level and 15 °C. Without a recorded
+temperature the standard 15 °C is used, so the elevation dependence survives
+even when the thermometer does not. Rider parameters ($m$, $C_{\mathrm{rr}}$,
+$C_{\mathrm d}A$, $\eta$) are tabulated under
+[Power estimation](#power-estimation).
 
 ### Torque
 
@@ -662,68 +664,84 @@ would instead give pedal *force* (see [quadrant analysis](#quadrant-analysis)):
 $$
 \tau = \frac{P}{\omega},
 \qquad
-\omega = \frac{2\pi\,n_{\mathrm{cad}}}{60}\ \left[\mathrm{rad\,s^{-1}}\right]
+\omega = 2\pi n
 $$
 
-Samples below $20\,\mathrm{rpm}$ are discarded rather than clamped: $\tau$
-diverges as $\omega \to 0$, and the resulting hundreds of newton-metres describe
-a sensor artefact rather than a rider.
+for a crank rotation rate $n$. Samples below 20 rpm are discarded rather than
+clamped: $\tau$ diverges as $\omega \to 0$, and the resulting hundreds of
+newton-metres describe a sensor artefact rather than a rider.
 
-### Training load — [details](#training-load)
+### Training-load metrics
 
-Evaluated on a $1\,\mathrm{Hz}$ grid over moving time $T$.
+*Fuller discussion: [Training load](#training-load).*
+
+With $\bar P_\theta$ the running mean of power over a trailing window $\theta$,
 
 $$
-\overline{P}_{30}(t) = \frac{1}{30\,\mathrm{s}}\int_{t-30\,\mathrm{s}}^{t} P(t')\,\mathrm{d}t',
+\bar P_\theta(t) = \frac{1}{\theta}\int_{t-\theta}^{t} P\,\mathrm{d}t',
 \qquad
-\mathrm{NP} = \left(\frac{1}{T}\int_0^{T}\overline{P}_{30}^{\,4}\,\mathrm{d}t\right)^{1/4}
+\mathrm{NP} = \left(\frac{1}{T}\int_0^{T}\bar P_\theta^{\,4}\,\mathrm{d}t\right)^{1/4}
 $$
 
 The fourth power is the whole point: it weights surges far above their duration,
-so a variable ride scores above a steady one of equal mean.
+so a variable ride scores above a steady one of equal mean. Here
+$\theta = 30$ s, evaluated on a 1 Hz grid over moving time $T$.
 
 $$
 \mathrm{IF} = \frac{\mathrm{NP}}{\mathrm{FTP}},
 \qquad
-\mathrm{VI} = \frac{\mathrm{NP}}{\overline{P}},
-\qquad
-\mathrm{TSS} = \frac{T\,\cdot\,\mathrm{NP}\,\cdot\,\mathrm{IF}}{\mathrm{FTP}\cdot 3600\,\mathrm{s}}\times 100,
+\mathrm{VI} = \frac{\mathrm{NP}}{\bar P},
 \qquad
 \mathrm{EF} = \frac{\mathrm{NP}}{\overline{\mathrm{HR}}}
 $$
 
-so that one hour at $\mathrm{IF}=1$ scores $\mathrm{TSS}=100$ by construction.
-Mechanical work $\int P\,\mathrm{d}t$ is reported in kJ and repeated unchanged
-as kcal: a gross cycling efficiency near $24\,\%$ and the
-$4.184\,\mathrm{kJ\,kcal^{-1}}$ conversion cancel to within a few percent.
+$$
+\mathrm{TSS} = 100\,\frac{T}{T_{\mathrm{ref}}}\,\mathrm{IF}^{2}
+$$
 
-### Aerobic decoupling — [details](#aerobic-decoupling-pwhr)
+with $T_{\mathrm{ref}}$ one hour, so that an hour at threshold scores 100 by
+construction. The code writes the algebraically identical
+$T\,\mathrm{NP}\,\mathrm{IF}/(\mathrm{FTP}\,T_{\mathrm{ref}})\times100$.
+
+Mechanical work $\int P\,\mathrm{d}t$ is reported in kJ and repeated unchanged
+as kcal: a gross cycling efficiency near 24 % and the 4.184 kJ per kcal cancel
+to within a few percent.
+
+### Aerobic decoupling
+
+*Fuller discussion: [Aerobic decoupling](#aerobic-decoupling-pwhr).*
 
 The ride is halved at its midpoint in elapsed time and the time-weighted
-power-to-heart-rate ratio compared:
+power-to-heart-rate ratio of each half compared:
 
 $$
-r_k = \frac{\overline{P}_k}{\overline{\mathrm{HR}}_k},
+r_k = \frac{\bar P_k}{\overline{\mathrm{HR}}_k},
 \qquad
-\mathrm{Pw{:}Hr} = \frac{r_1 - r_2}{r_1}\times 100\,\%
+\mathrm{Pw{:}Hr} = \frac{r_1 - r_2}{r_1}
 $$
 
 Positive means heart rate drifted upward for the same power — cardiac drift.
+Reported as a percentage.
 
-### Critical power — [details](#critical-power-model)
+### Critical power
+
+*Fuller discussion: [Critical power](#critical-power-model).*
 
 The two-parameter hyperbolic model. It is linear in $1/t$, so $\mathrm{CP}$ and
-$W'$ come from an ordinary least-squares regression of mean power on inverse
-duration over the $2$–$20\,\mathrm{min}$ efforts:
+$W'$ follow from an ordinary least-squares regression of mean power on inverse
+duration:
 
 $$
-P(t) = \mathrm{CP} + \frac{W'}{t},
-\qquad 120\,\mathrm{s} \le t \le 1200\,\mathrm{s}
+P(t) = \mathrm{CP} + \frac{W'}{t}
 $$
 
-$W'$ is the slope, $\mathrm{CP}$ the intercept. The balance of the anaerobic
-reserve follows Skiba–Clarke: it drains at the excess above $\mathrm{CP}$ and
-refills in proportion to how depleted it already is,
+$W'$ is the slope and $\mathrm{CP}$ the intercept, fitted over efforts of 2 to
+20 minutes — long enough to be aerobically limited, short enough that the
+hyperbola still has curvature to resolve.
+
+The balance of the anaerobic reserve follows Skiba–Clarke: it drains at the
+excess above $\mathrm{CP}$ and refills in proportion to how depleted it already
+is,
 
 $$
 \frac{\mathrm{d}W'_{\mathrm{bal}}}{\mathrm{d}t} =
@@ -739,12 +757,15 @@ is fast when deeply fatigued and asymptotically slow near full.
 
 A **match** is counted with hysteresis, so a single deep effort is not counted
 repeatedly while the balance wavers: $W'_{\mathrm{bal}}$ must fall below
-$0.50\,W'$ to count one, and recover above $0.75\,W'$ before another can be.
+$\tfrac{1}{2}W'$ to count one, and recover above $\tfrac{3}{4}W'$ before another
+can be.
 
-### Fatigue resistance — [details](#fatigue-resistance)
+### Fatigue-resistance search
+
+*Fuller discussion: [Fatigue resistance](#fatigue-resistance).*
 
 The peak-effort search, restricted to windows that *begin* only after a given
-amount of mechanical work has been done:
+amount of mechanical work $K$ has been done:
 
 $$
 P^{\star}(D, K) = \max_{t_0,\,t_1}\ \frac{1}{t_1 - t_0}\int_{t_0}^{t_1} P\,\mathrm{d}t
@@ -755,51 +776,56 @@ t_1 - t_0 \ge D,
 $$
 
 $$
-\text{fade} = \frac{P^{\star}(D, K_{\min}) - P^{\star}(D, K_{\max})}{P^{\star}(D, K_{\min})}\times 100\,\%
+\mathrm{fade} = \frac{P^{\star}(D, K_{\min}) - P^{\star}(D, K_{\max})}{P^{\star}(D, K_{\min})}
 $$
 
-Indexing by work $K$ rather than elapsed time is deliberate: two hours of
+Indexing by work rather than by elapsed time is deliberate: two hours of
 climbing and four hours of flat are not the same fatigue.
 
-### Quadrant analysis — [details](#quadrant-analysis)
+### Pedal force and velocity
+
+*Fuller discussion: [Quadrant analysis](#quadrant-analysis).*
+
+With $n$ the crank rotation rate and $\ell$ the crank length,
 
 $$
-\mathrm{CPV} = \frac{2\pi\,n_{\mathrm{cad}}}{60}\,\ell_{\mathrm{crank}}
-\ \left[\mathrm{m\,s^{-1}}\right],
+\mathrm{CPV} = 2\pi n\,\ell,
 \qquad
-\mathrm{AEPF} = \frac{P}{\mathrm{CPV}}\ \left[\mathrm{N}\right]
+\mathrm{AEPF} = \frac{P}{\mathrm{CPV}}
 $$
 
-The crosshair dividing the quadrants sits at FTP delivered at
-$90\,\mathrm{rpm}$.
+The crosshair dividing the quadrants sits at FTP delivered at 90 rpm.
 
-### Training trend — [details](#multi-ride-trend-ctl-atl-tsb)
+### Training trend
+
+*Fuller discussion: [Training trend](#multi-ride-trend-ctl-atl-tsb).*
 
 Two exponentially weighted moving averages of daily TSS, with rest days entering
-as zero. Each is the exact one-day discretisation of a first-order relaxation
-$\dot X = (\mathrm{TSS} - X)/\tau$:
+as zero. Each is the exact discretisation, at unit time step, of a first-order
+relaxation $\dot X = (\mathrm{TSS} - X)/\theta$:
 
 $$
 X_n = X_{n-1} + \left(\mathrm{TSS}_n - X_{n-1}\right)k,
 \qquad
-k = 1 - e^{-1/\tau}
+k = 1 - e^{-1/\theta}
 $$
-
-with $\tau_{\mathrm{CTL}} = 42\,\mathrm{d}$ (fitness) and
-$\tau_{\mathrm{ATL}} = 7\,\mathrm{d}$ (fatigue), and
 
 $$
 \mathrm{TSB}_n = \mathrm{CTL}_{n-1} - \mathrm{ATL}_{n-1}
 $$
 
-evaluated *before* the day's ride is applied, so it reads as the form the rider
-carried into that day.
+with time constants of 42 days for CTL (fitness) and 7 days for ATL (fatigue).
+TSB is evaluated *before* the day's ride is applied, so it reads as the form the
+rider carried into that day.
 
-### Spectra — [details](#autocorrelation-power-spectrum)
+### Spectra
+
+*Fuller discussion: [Spectra](#autocorrelation-power-spectrum).*
 
 The channel is resampled onto a uniform grid of spacing $\Delta t$, the mean
 removed, and zero-padded to $N \ge 2M$ so that the inverse transform of the
-power spectrum yields the *linear* rather than the circular autocorrelation:
+power spectrum yields the *linear* rather than the circular autocorrelation
+($M$ is the resampled length):
 
 $$
 X_j = \sum_{n=0}^{N-1} x_n\,e^{-2\pi \mathrm{i}\,jn/N},
@@ -809,7 +835,7 @@ f_j = \frac{j}{N\Delta t},
 $$
 
 $$
-\hat{S}(f_j) = \frac{\Delta t}{M}\left|X_j\right|^{2}\cdot
+\hat{S}(f_j) = \frac{\Delta t}{M}\left|X_j\right|^{2}
 \begin{cases}
 1, & j = 0 \ \text{or}\ j = N/2\\
 2, & \text{otherwise}
@@ -820,7 +846,7 @@ the doubling folding the negative frequencies onto the one-sided estimate. The
 normalisation satisfies Parseval,
 
 $$
-\sum_j \hat{S}(f_j)\,\Delta f = \frac{1}{M}\sum_n x_n^2 = \sigma^2
+\sum_j \hat{S}(f_j)\,\Delta f = \frac{1}{M}\sum_n x_n^{2} = \sigma^{2}
 $$
 
 and the autocorrelation follows by Wiener–Khinchin,
@@ -830,10 +856,9 @@ $$
 {\mathcal{F}^{-1}\!\left[\left|X\right|^2\right](0)}
 $$
 
-normalised so $\hat R(0) = 1$. The Nyquist frequency is
-$f_{\max} = 1/(2\Delta t) = 0.5\,\mathrm{Hz}$ for the usual $1\,\mathrm{s}$
-GPS sampling — below the pedal stroke, so cadence is aliased and its spectrum
-shows only slow variation.
+normalised so $\hat R(0) = 1$. The Nyquist frequency is $1/(2\Delta t)$, which
+for the usual 1 s GPS sampling is 0.5 Hz — below the pedal stroke, so cadence is
+aliased and its spectrum shows only slow variation.
 
 ## Interpreting the results
 
