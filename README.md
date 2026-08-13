@@ -19,12 +19,15 @@ command-line tool (`gpx_reader`) and an optional desktop GUI (`gpxana_gui`).
   more accurate power estimate
 - Fastest segment finder: sliding-window search by distance or time
 - Autocorrelation function and power spectrum of each time-dependent channel
-  (velocity, power, heart rate, cadence), exported as 4-column text files
+  (velocity, power, heart rate, cadence, crank torque), exported as 4-column
+  text files
 - Training metrics: Normalized Power, Intensity Factor, TSS, Variability Index,
   energy (kJ/kcal) and watts-per-kilo
-- Power and heart-rate training-zone distributions (time in zone)
+- Power, heart-rate and cadence distributions (time in zone / band)
 - Aerobic decoupling (Pw:Hr) and Efficiency Factor (NP/HR) — durability/fitness
 - Peak-power efforts table (best 5 s … 1 h, with where in the ride they occurred)
+- Fatigue resistance: the same peak efforts recomputed after 500, 1000, 1500 …
+  kJ of work, so the fade over a long ride is measured rather than guessed
 - Quadrant analysis (pedal force × cadence) when the track has cadence
 - Anaerobic-reserve "matches" burned, from the W' balance
 - Per-distance split table (pace, power, HR, climbing per split)
@@ -32,8 +35,9 @@ command-line tool (`gpx_reader`) and an optional desktop GUI (`gpxana_gui`).
 - Critical-power model (CP and W') with an optional W'-balance export
 - Multi-ride training trend (CTL / ATL / TSB) when several files are given
 - Multiple `--dist` and `--time` queries supported in a single run
-- Optional desktop GUI (Dear ImGui + ImPlot): the same report with the tables
-  charted, plus interactive autocorrelation and power-spectrum views
+- Optional desktop GUI (Dear ImGui + ImPlot): several rides open at once, each
+  with the report charted, its raw signals against time, its autocorrelation and
+  power spectrum — and a view comparing every open ride by distance
 
 ## Requirements
 
@@ -133,6 +137,7 @@ Autocorrelation & power spectrum (4-col: lag, acf, freq, psd):
   --acf-power-measured F measured <power>                    -> F
   --acf-hr F             heart rate                          -> F
   --acf-cadence F        cadence (rpm)                       -> F
+  --acf-torque F         crank torque (Nm)                   -> F
   --acf-dt S             uniform resample interval in s (default: auto = median)
 
 Wind (Open-Meteo historical API; improves the aero term):
@@ -236,37 +241,53 @@ GUI without a change on the GUI side. The charts are the same numbers as
 structs rather than as text.
 
 ```bash
-./build/gpxana_gui                      # then use the Load button
-./build/gpxana_gui rides/morning.gpx    # or open a file straight away
+./build/gpxana_gui                                  # then use the Load button
+./build/gpxana_gui morning.gpx evening.gpx          # or open several at once
 ```
 
-A `.gpx` file can also be dragged onto the window.
+Every file opens in a tab of its own, and `.gpx` files can be dragged onto the
+window. The chooser takes several at a time; a file already open is focused
+rather than loaded twice.
 
 ![The report page, with the time-in-zone chart under its table](gui/screenshots/report-zones.png)
 
 ### Toolbar
 
+These settings describe the rider rather than any one ride, so they apply to
+every open file and changing one re-runs them all.
+
 | Control | What it does |
 |---|---|
-| `Load GPX...` | Native file chooser (via `zenity`). Without it, a path box appears instead. |
-| `Reload` | Re-run the analysis on the current file. |
-| `Copy report` | Put the whole text report on the clipboard. |
-| `track points` | How many points the report lists first — mirrors `--points`. |
+| `Load GPX...` | Native file chooser (via `zenity`), multi-select. Without it, a path box appears instead. |
+| `Reload all` | Re-run the analysis on every open file. |
+| `track points` | How many points each report lists first — mirrors `--points`. |
 | `wind` | Fetch historical wind and apply it, exactly as `--wind` does. Off by default; it is the only control that reaches the network. |
+
+### File tabs
+
+One per open ride, reorderable and closable, with the full path on hover. Each
+holds four views of its own — Report, Signals, Autocorrelation, Power spectrum —
+and each keeps its own track selection, channel choices and zoom, so two rides
+can be examined in different ways side by side.
+
+Once a second file is open, a **Compare** tab appears at the end of the bar.
 
 ### Report tab
 
 The full text report in one scrolling page, with a chart placed directly below
 the table it illustrates:
 
-- **Time in power zones** — horizontal bars, one per zone, scaled to the largest
-  zone so short ones stay visible; the printed percentages carry the true
-  proportions.
+- **Time in power zones** and **time in cadence bands** — horizontal bars, one
+  per zone, scaled to the largest so short ones stay visible; the printed
+  percentages carry the true proportions.
 - **Peak power efforts** — one bar per duration, shortest to longest, so the
   bars fall away as the power-duration staircase. Each is coloured by the zone
   it lands in, with the zone named beside it. Below it the same efforts read the
   other way round: how long each fraction of your power was held, against
   either the ride's best effort or FTP.
+- **Fatigue resistance** — one line per duration, plotted against work already
+  done, with the fade stated above it. A line that sags to the right is a rider
+  losing power as the ride goes on; one that stays flat is durability.
 - **Climbs** — one elevation profile per detected climb, shaded by the power
   zone each stretch was ridden in, with distance or time on the x axis.
 
@@ -274,11 +295,47 @@ the table it illustrates:
 
 Files with several tracks get a selector that switches every chart on the page.
 
+### Signals tab
+
+The ride's channels plotted raw against elapsed time — velocity, estimated and
+measured power, heart rate, cadence, crank torque, elevation and temperature.
+Where the spectral tabs answer *what repeats*, this answers *what happened, and
+when*.
+
+The plots are stacked rather than overlaid, because watts in the hundreds and
+gradient in single digits cannot share a y axis. Stacking costs the ability to
+read one signal against another, which linking the x axes buys back: zoom or pan
+any plot and the rest follow, so a vertical line through the stack is one moment
+in the ride. The axis is pinned to the data, and ticks read as elapsed clock
+time rather than a raw second count.
+
+### Compare tab
+
+Every open ride's channels on shared axes, one plot per channel and one line per
+ride. Available once a second file is open.
+
+Rides are lined up **by distance** by default, because the question is usually
+how two attempts at the same road differ and only distance puts the same climb
+at the same place; elapsed time is a radio away for when the question is about
+the effort instead. Switching between them resets the zoom, since the stored
+span is kilometres in one mode and seconds in the other.
+
+One plot per channel is possible here — unlike the Signals tab — precisely
+because the same channel across rides shares a unit. Colour therefore identifies
+the *ride* and is held across every plot, so the tab carries a key naming the
+files in their colours, and hovering shows every ride's value at the cursor
+rather than one: the gap between them is the point.
+
+The channel list is the union of what the rides carry, not the intersection. Two
+of four rides having no cadence is a fact worth seeing, not a reason to hide the
+channel from the two that recorded it, so such a plot names the rides that could
+not supply it.
+
 ### Autocorrelation and Power spectrum tabs
 
-Both are computed on demand from the ride's channels (velocity, estimated
-power, measured power, heart rate, cadence) by the same `signal::compute_acf_psd`
-the `--acf-*` flags use, so the plots and those files carry the same numbers.
+Both are computed on demand from the ride's channels by the same
+`signal::compute_acf_psd` the `--acf-*` flags use, so the plots and those files
+carry the same numbers.
 
 Tick the channels you want, optionally set the resample interval (`0` = auto,
 mirroring `--acf-dt`), and press `Compute`.
@@ -663,6 +720,13 @@ Time spent in each **power zone** (Coggan 7-zone model as % of FTP) and, when
 max HR). Shows at a glance whether the ride was recovery, endurance, tempo or
 threshold work.
 
+A **cadence distribution** runs alongside them when the track carries cadence.
+Its bands are absolute rather than a fraction of anything, because unlike power
+and heart rate cadence has no per-rider reference to scale against — 90 rpm is
+90 rpm whoever is pedalling. Coasting is excluded rather than counted as
+grinding, so a descent does not swamp the pedalling that actually happened. It
+says how the work was delivered, where the power zones say how hard it was.
+
 ### Aerobic decoupling (Pw:Hr)
 
 Splits the moving time in half and compares the power-to-heart-rate ratio of each
@@ -675,6 +739,38 @@ good aerobic durability. Needs heart-rate data.
 The best average power sustained over each of a set of durations (5 s … 1 h),
 with the elapsed time and timestamp of where each effort occurred — e.g. "best
 5-min: 308 W starting at 58m44s". Uses measured power when the track carries it.
+
+### Fatigue resistance
+
+The peak-power table says what the rider can do; it does not say when in the
+ride they did it. Twenty minutes at 300 W in the first hour and the same twenty
+minutes after 2000 kJ are different efforts, and the gap between them is what
+separates riders who hold their form to the end of a long day from riders who do
+not.
+
+The same best-effort search runs again for each duration, with the window's
+start bounded below by the point at which a given amount of mechanical work had
+already been done — so each column is the same question asked of a
+progressively more tired rider:
+
+```
+=== Fatigue resistance (estimated), over 2140 kJ ===
+  Best power for each duration, starting only after this much work:
+   Duration      0 kJ    500 kJ   1000 kJ   1500 kJ   2000 kJ    Fade
+      1m 0s     313 W     313 W     313 W     270 W     246 W  +21.4 %
+      5m 0s     243 W     243 W     238 W     226 W     202 W  +16.9 %
+     20m 0s     211 W     211 W     208 W     208 W         -   +1.1 %
+```
+
+Work, not elapsed time, indexes the table: two hours of climbing and four hours
+of flat are not the same fatigue. Thresholds the ride never reached are dropped
+rather than shown as empty columns, so a short ride yields a short table, and the
+fade compares the freshest reading against the deepest one actually reached.
+
+A large fade at the long durations is the signature that matters — it is aerobic
+durability rather than a bad sprint. The row above shows a rider whose
+twenty-minute power barely moved over 2140 kJ while their one-minute power fell
+a fifth: steady endurance intact, top end gone.
 
 ### Quadrant analysis
 
@@ -780,10 +876,21 @@ detection and fastest-segment queries are run independently for each track.
 │       ├── app_window.hpp/.cpp  The window's contents and the state behind them
 │       ├── analysis.hpp/.cpp    Runs app::run(), captures the report, collects
 │       │                        the chart data (namespace gui)
+│       ├── file_view.hpp/.cpp      One open ride and its four views
+│       ├── signal_view.hpp/.cpp    Channels plotted raw against elapsed time
+│       ├── compare_view.hpp/.cpp   Several rides on shared axes
 │       ├── spectral_view.hpp/.cpp  Autocorrelation and power-spectrum plots
+│       ├── durability_chart.hpp/.cpp  Power decay as work accumulates
 │       ├── peaks_chart.hpp/.cpp    Peak-effort bars and the hold curve
 │       ├── zone_chart.hpp/.cpp     Time-in-zone bars
 │       ├── hill_chart.hpp/.cpp     Per-climb elevation profiles
+│       ├── theme.hpp/.cpp          Shared colours and scoped ImPlot state
+│       ├── bar_row.hpp/.cpp        Shared horizontal-bar chart vocabulary
+│       ├── panel.hpp/.cpp          The bordered card the report charts sit in
+│       ├── format.hpp/.cpp         Duration formatting
+│       ├── paths.hpp/.cpp          Path splitting
+│       ├── span.hpp                A closed interval on a plot axis
+│       ├── window.hpp/.cpp         GLFW/OpenGL/ImGui/ImPlot lifetimes
 │       ├── palette.hpp/.cpp        Shared zone/series colours
 │       └── file_dialog.hpp/.cpp    Native open dialog (via zenity)
 └── src/
@@ -801,6 +908,7 @@ detection and fastest-segment queries are run independently for each track.
     ├── splits.hpp/.cpp    Per-distance split table
     ├── cp_model.hpp/.cpp  Critical-power (CP / W') fit, W'-balance + matches
     ├── peaks.hpp/.cpp     Peak-power efforts with timestamps (namespace peaks)
+    ├── durability.hpp/.cpp  Best power after N kJ of work (namespace durability)
     ├── quadrant.hpp/.cpp  Force × cadence quadrant analysis (namespace quadrant)
     ├── trends.hpp/.cpp    Multi-ride CTL / ATL / TSB progression
     ├── wind.hpp/.cpp      Open-Meteo fetch/cache + per-track obtain() (namespace wind)
