@@ -241,6 +241,8 @@ structs rather than as text.
 
 A `.gpx` file can also be dragged onto the window.
 
+![The report page, with the time-in-zone chart under its table](gui/screenshots/report-zones.png)
+
 ### Toolbar
 
 | Control | What it does |
@@ -267,6 +269,8 @@ the table it illustrates:
 - **Climbs** — one elevation profile per detected climb, shaded by the power
   zone each stretch was ridden in, with distance or time on the x axis.
 
+![Peak power efforts and the hold curve](gui/screenshots/report-peaks.png)
+
 Files with several tracks get a selector that switches every chart on the page.
 
 ### Autocorrelation and Power spectrum tabs
@@ -289,9 +293,17 @@ Two more controls sit alongside, for tying the plots to the exported files:
   dimensionless and start at 1, with a zero line marking where a signal stops
   resembling itself. Opens on the first 10 minutes of lag, where the structure
   is; a checkbox shows the whole range.
+
+  ![Autocorrelation of all four channels](gui/screenshots/autocorrelation.png)
+
+  Heart rate and velocity decay slowly over minutes; power and cadence fall away
+  within seconds and then oscillate around zero.
+
 - **Power spectrum** — one plot per channel, because each is in its own units
   squared per hertz. Linear axes over the full frequency range, drawing the same
   points as `plot 'x.acf.dat' u 3:4 w l`.
+
+  ![Power spectra, one plot per channel](gui/screenshots/power-spectrum.png)
 
 Hovering either plot shows where the cursor is, in that plot's units — lag and
 autocorrelation on one, frequency and spectral density on the other. The
