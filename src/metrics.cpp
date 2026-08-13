@@ -1,5 +1,7 @@
 #include "metrics.hpp"
 
+#include "ride.hpp"
+
 #include <cmath>
 #include <vector>
 
@@ -8,17 +10,8 @@ namespace metrics {
 namespace {
 
 // Steps longer than this are treated as a stop and dropped from moving time.
-constexpr Long STOP_S = 20;
 
 /// Measured power on step (i-1 -> i): mean of the endpoints that carry <power>.
-Real measured_step(const std::vector<TrackPoint>& pts, Size i) {
-    const Bool a = pts[i - 1].has_power, b = pts[i].has_power;
-    if (a && b) return 0.5 * (pts[i - 1].power + pts[i].power);
-    if (b)      return static_cast<Real>(pts[i].power);
-    if (a)      return static_cast<Real>(pts[i - 1].power);
-    return 0.0;
-}
-
 /// Moving-time power series at 1 Hz (stops removed), by holding each step's
 /// power for its whole duration. Also returns the total mechanical work (J).
 std::vector<Real> moving_power_1hz(const Track& track, const PowerAnalysis& pa,
@@ -33,8 +26,8 @@ std::vector<Real> moving_power_1hz(const Track& track, const PowerAnalysis& pa,
     for (Size i = 1; i < n; ++i) {
         if (pa.t_offset_s[i] < 0 || pa.t_offset_s[i - 1] < 0) continue;
         const Long d = pa.t_offset_s[i] - pa.t_offset_s[i - 1];
-        if (d <= 0 || d > STOP_S) continue;               // gap / stop
-        const Real pw = measured ? measured_step(pts, i) : pa.point_power_w[i];
+        if (d <= 0 || d > ride::kStopSeconds) continue;               // gap / stop
+        const Real pw = measured ? ride::step_power(pts, pa, i, true) : pa.point_power_w[i];
         energy_j += pw * static_cast<Real>(d);
         for (Long k = 0; k < d; ++k) g.push_back(pw);
     }
@@ -100,7 +93,7 @@ TrainingLoad training_load(const Track& track, const PowerAnalysis& pa,
     for (Size i = 1; i < pts.size(); ++i) {
         if (pa.t_offset_s[i] < 0 || pa.t_offset_s[i - 1] < 0) continue;
         const Long dt = pa.t_offset_s[i] - pa.t_offset_s[i - 1];
-        if (dt <= 0 || dt > STOP_S || !pts[i].has_hr) continue;
+        if (dt <= 0 || dt > ride::kStopSeconds || !pts[i].has_hr) continue;
         hr_sum += static_cast<double>(pts[i].hr) * dt;
         hr_w   += dt;
     }
@@ -133,11 +126,11 @@ Decoupling decoupling(const Track& track, const PowerAnalysis& pa) {
     for (Size i = 1; i < n; ++i) {
         if (pa.t_offset_s[i] < 0 || pa.t_offset_s[i - 1] < 0) continue;
         const Long dt = pa.t_offset_s[i] - pa.t_offset_s[i - 1];
-        if (dt <= 0 || dt > STOP_S) continue;
+        if (dt <= 0 || dt > ride::kStopSeconds) continue;
         if (!pts[i].has_hr) continue;
         Real hr = pts[i].hr;
         if (pts[i - 1].has_hr) hr = 0.5 * (pts[i - 1].hr + pts[i].hr);
-        const Real pw = measured ? measured_step(pts, i) : pa.point_power_w[i];
+        const Real pw = measured ? ride::step_power(pts, pa, i, true) : pa.point_power_w[i];
         const Real w  = static_cast<Real>(dt);
         if (pa.t_offset_s[i] <= mid) { p1 += pw * w; h1 += hr * w; w1 += w; }
         else                         { p2 += pw * w; h2 += hr * w; w2 += w; }

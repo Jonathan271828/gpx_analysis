@@ -1,5 +1,7 @@
 #include "gpx_reader.hpp"
 
+#include "ride.hpp"
+
 #include <pugixml.hpp>
 #include <algorithm>
 #include <cctype>
@@ -883,18 +885,6 @@ void GpxReader::attach_climb_power(std::vector<Hill>& hills,
 
 namespace {
 
-/// Measured power on step (i-1 -> i): average of the two endpoints when both
-/// carry <power>, otherwise whichever endpoint has it (0 if neither).
-Real measured_step_power(const std::vector<TrackPoint>& pts, Size i)
-{
-    const Bool a = pts[i - 1].has_power;
-    const Bool b = pts[i].has_power;
-    if (a && b) return 0.5 * (pts[i - 1].power + pts[i].power);
-    if (b)      return static_cast<Real>(pts[i].power);
-    if (a)      return static_cast<Real>(pts[i - 1].power);
-    return 0.0;
-}
-
 } // namespace
 
 // ---------------------------------------------------------------------------
@@ -908,62 +898,31 @@ PowerCurve GpxReader::power_curve(const PowerAnalysis&     pa,
     PowerCurve curve;
     if (track_index >= data_.tracks.size() || !pa.stats.valid) return curve;
 
-    const auto&       pts = data_.tracks[track_index].points;
-    const Size n   = pts.size();
+    const Track& track = data_.tracks[track_index];
+    const Size   n     = track.points.size();
     if (n < 2 || pa.point_power_w.size() != n || pa.t_offset_s.size() != n)
         return curve;
 
     const Bool has_meas = pa.stats.has_measured;
+    curve.has_measured  = has_meas;
 
-    // Cumulative time and energy (index 0 == 0). Steps with an unusable
-    // timestamp contribute nothing, so windows can't accrue phantom energy.
-    std::vector<Real> ct(n, 0.0);       // cumulative valid seconds
-    std::vector<Real> ce_est(n, 0.0);   // cumulative estimated energy (J)
-    std::vector<Real> ce_meas(n, 0.0);  // cumulative measured energy (J)
-
-    for (Size i = 1; i < n; ++i) {
-        Real dt = 0.0;
-        if (pa.t_offset_s[i] >= 0 && pa.t_offset_s[i - 1] >= 0) {
-            const Long d = pa.t_offset_s[i] - pa.t_offset_s[i - 1];
-            if (d > 0) dt = static_cast<Real>(d);
-        }
-        ct[i]     = ct[i - 1]     + dt;
-        ce_est[i] = ce_est[i - 1] + pa.point_power_w[i] * dt;
-        if (has_meas)
-            ce_meas[i] = ce_meas[i - 1] + measured_step_power(pts, i) * dt;
-    }
-
-    const Real total = ct.back();
-    if (total <= 0.0) return curve;
-
-    curve.has_measured = has_meas;
+    // The search runs on the estimated series; the measured one is accumulated
+    // alongside so the same window can be reported from both, rather than
+    // letting the two disagree about which window was the rider's best.
+    const ride::Cumulative est  = ride::accumulate(track, pa, false);
+    const ride::Cumulative meas = has_meas ? ride::accumulate(track, pa, true)
+                                           : ride::Cumulative{};
+    if (est.total_seconds() <= 0.0) return curve;
 
     for (Long D : durations_s) {
-        if (D <= 0 || static_cast<Real>(D) > total) continue;
+        if (D <= 0 || static_cast<Real>(D) > est.total_seconds()) continue;
 
-        // Two-pointer sliding window maximising energy/time over windows of at
-        // least D seconds (mirrors fastest_by_time, energy in place of distance).
-        Real best_est = 0.0, best_meas = 0.0;
-        Bool   found    = false;
-        Size hi  = 1;
-        for (Size lo = 0; lo < n - 1; ++lo) {
-            while (hi < n - 1 && (ct[hi] - ct[lo]) < static_cast<Real>(D))
-                ++hi;
-            const Real span = ct[hi] - ct[lo];
-            if (span < static_cast<Real>(D)) continue;
-
-            const Real avg_est = (ce_est[hi] - ce_est[lo]) / span;
-            if (!found || avg_est > best_est) {
-                best_est = avg_est;
-                if (has_meas) best_meas = (ce_meas[hi] - ce_meas[lo]) / span;
-                found = true;
-            }
-        }
-        if (!found) continue;
+        const ride::Window w = ride::best_window(est, 0, D);
+        if (!w.found) continue;
 
         curve.duration_s.push_back(D);
-        curve.est_power_w.push_back(best_est);
-        if (has_meas) curve.meas_power_w.push_back(best_meas);
+        curve.est_power_w.push_back(w.mean_power_w);
+        if (has_meas) curve.meas_power_w.push_back(ride::mean_power_over(meas, w));
     }
 
     curve.valid = !curve.duration_s.empty();
@@ -996,7 +955,7 @@ PowerHistogram GpxReader::power_histogram(const PowerAnalysis& pa,
     for (Size i = 1; i < n; ++i) {
         if (pa.point_power_w[i] > max_p) max_p = pa.point_power_w[i];
         if (has_meas) {
-            const Real m = measured_step_power(pts, i);
+            const Real m = ride::step_power(pts, pa, i, true);
             if (m > max_p) max_p = m;
         }
     }
@@ -1022,7 +981,7 @@ PowerHistogram GpxReader::power_histogram(const PowerAnalysis& pa,
 
         if (has_meas) {
             Size bm = static_cast<Size>(
-                std::floor(measured_step_power(pts, i) / bin_w));
+                std::floor(ride::step_power(pts, pa, i, true) / bin_w));
             if (bm >= nbins) bm = nbins - 1;
             hist.meas_seconds[bm] += dt;
         }

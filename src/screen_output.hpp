@@ -15,6 +15,7 @@
 #include "cp_model.hpp"     // CpFit, MatchStats
 #include "trends.hpp"       // TrendPoint
 #include "durability.hpp"
+#include "profile.hpp"
 #include "peaks.hpp"        // PeakEffort
 #include "quadrant.hpp"     // Quadrants
 
@@ -56,6 +57,13 @@ void print_peaks(const std::vector<peaks::PeakEffort>& pk);
  * @param r The report; nothing is printed when it is invalid.
  */
 void print_durability(const durability::Report& r);
+
+/**
+ * @brief Print the rider profile: each duration against the balanced shape,
+ *        the phenotype it suggests, and what that implies for training.
+ * @param p The profile; nothing is printed when it is invalid.
+ */
+void print_profile(const profile::Profile& p);
 /** @brief Print the quadrant analysis (force × cadence). */
 void print_quadrant(const quadrant::Quadrants& q);
 /** @brief Print the multi-ride training trend (CTL / ATL / TSB). */

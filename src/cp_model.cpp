@@ -1,5 +1,7 @@
 #include "cp_model.hpp"
 
+#include "ride.hpp"
+
 #include <cmath>
 #include <vector>
 
@@ -64,7 +66,7 @@ std::vector<WbalSample> wbal_series(const Track& track, const PowerAnalysis& pa,
     for (Size i = 1; i < n; ++i) {
         if (pa.t_offset_s[i] < 0 || pa.t_offset_s[i - 1] < 0) continue;
         const Long dt = pa.t_offset_s[i] - pa.t_offset_s[i - 1];
-        if (dt <= 0 || dt > 20) continue;                 // gap / stop
+        if (dt <= 0 || dt > ride::kStopSeconds) continue;  // gap / stop
         const Real p = pa.point_power_w[i];
         if (p > cp_w)
             wbal -= (p - cp_w) * static_cast<Real>(dt);

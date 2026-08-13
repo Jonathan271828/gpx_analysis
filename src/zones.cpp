@@ -1,5 +1,7 @@
 #include "zones.hpp"
 
+#include "ride.hpp"
+
 #include <array>
 #include <string>
 
@@ -7,7 +9,6 @@ namespace zones {
 
 namespace {
 
-constexpr Long STOP_S = 20;   // steps longer than this are stops, not riding
 
 /// Add `seconds` to the first zone whose [lo, hi) contains `value` (the last
 /// zone is open-topped).
@@ -56,7 +57,7 @@ ZoneTable power_zones(const Track& track, const PowerAnalysis& pa, Real ftp_w) {
     for (Size i = 1; i < n; ++i) {
         if (pa.t_offset_s[i] < 0 || pa.t_offset_s[i - 1] < 0) continue;
         const Long dt = pa.t_offset_s[i] - pa.t_offset_s[i - 1];
-        if (dt <= 0 || dt > STOP_S) continue;
+        if (dt <= 0 || dt > ride::kStopSeconds) continue;
         bucket(z.zones, pa.point_power_w[i], static_cast<Real>(dt));
         z.total_s += static_cast<Real>(dt);
     }
@@ -109,7 +110,7 @@ ZoneTable hr_zones(const Track& track, const PowerAnalysis& pa,
     for (Size i = 1; i < n; ++i) {
         if (pa.t_offset_s[i] < 0 || pa.t_offset_s[i - 1] < 0) continue;
         const Long dt = pa.t_offset_s[i] - pa.t_offset_s[i - 1];
-        if (dt <= 0 || dt > STOP_S) continue;
+        if (dt <= 0 || dt > ride::kStopSeconds) continue;
         if (!pts[i].has_hr) continue;
         bucket(z.zones, static_cast<Real>(pts[i].hr), static_cast<Real>(dt));
         z.total_s += static_cast<Real>(dt);
@@ -151,7 +152,7 @@ ZoneTable cadence_zones(const Track& track, const PowerAnalysis& pa) {
     for (Size i = 1; i < n; ++i) {
         if (pa.t_offset_s[i] < 0 || pa.t_offset_s[i - 1] < 0) continue;
         const Long dt = pa.t_offset_s[i] - pa.t_offset_s[i - 1];
-        if (dt <= 0 || dt > STOP_S) continue;
+        if (dt <= 0 || dt > ride::kStopSeconds) continue;
         if (!pts[i].has_cad || pts[i].cad < COASTING_RPM) continue;
         bucket(z.zones, static_cast<Real>(pts[i].cad), static_cast<Real>(dt));
         z.total_s += static_cast<Real>(dt);

@@ -1,5 +1,7 @@
 #include "quadrant.hpp"
 
+#include "ride.hpp"
+
 #include <cmath>
 #include <vector>
 
@@ -7,16 +9,7 @@ namespace quadrant {
 
 namespace {
 
-constexpr Long STOP_S      = 20;   // steps longer than this are stops
 constexpr Real REF_CADENCE = 90.0; // crosshair reference cadence (rpm)
-
-Real measured_step(const std::vector<TrackPoint>& pts, Size i) {
-    const Bool a = pts[i - 1].has_power, b = pts[i].has_power;
-    if (a && b) return 0.5 * (pts[i - 1].power + pts[i].power);
-    if (b)      return static_cast<Real>(pts[i].power);
-    if (a)      return static_cast<Real>(pts[i - 1].power);
-    return 0.0;
-}
 
 /// Circumferential pedal velocity (m/s) for a cadence in rpm.
 Real cpv(Real cadence_rpm, Real crank_m) {
@@ -44,12 +37,12 @@ Quadrants analyse(const Track& track, const PowerAnalysis& pa,
     for (Size i = 1; i < n; ++i) {
         if (pa.t_offset_s[i] < 0 || pa.t_offset_s[i - 1] < 0) continue;
         const Long dt = pa.t_offset_s[i] - pa.t_offset_s[i - 1];
-        if (dt <= 0 || dt > STOP_S) continue;
+        if (dt <= 0 || dt > ride::kStopSeconds) continue;
         if (!pts[i].has_cad || pts[i].cad <= 0) continue;   // coasting / no data
 
         const Real v = cpv(static_cast<Real>(pts[i].cad), crank_length_m);
         if (v <= 0.0) continue;
-        const Real p = measured ? measured_step(pts, i) : pa.point_power_w[i];
+        const Real p = measured ? ride::step_power(pts, pa, i, true) : pa.point_power_w[i];
         const Real f = p / v;                                // AEPF (N)
         const Real w = static_cast<Real>(dt);
 

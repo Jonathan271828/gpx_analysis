@@ -10,6 +10,7 @@
 
 #include "channels.hpp"   // channels::Channel
 #include "durability.hpp" // durability::Report
+#include "profile.hpp"    // profile::Profile
 #include "zones.hpp"      // zones::ZoneTable
 
 #include <cstddef>
@@ -92,6 +93,7 @@ struct TrackCharts {
     std::vector<HillProfile> hills;         ///< One entry per detected climb.
     std::vector<PeakBar>     peaks;         ///< Mean-maximal power curve.
     durability::Report       durability;    ///< Power decay as work accumulates.
+    profile::Profile         rider_profile; ///< Shape of the power-duration curve.
     Real                     ftp_w = 0.0;   ///< FTP the analysis ran with (W).
 
     /// The per-sample series the track carries (velocity, power, heart rate,

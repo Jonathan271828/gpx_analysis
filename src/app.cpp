@@ -8,6 +8,7 @@
 #include "io_base.hpp"
 #include "metrics.hpp"
 #include "peaks.hpp"
+#include "profile.hpp"
 #include "quadrant.hpp"
 #include "screen_output.hpp"
 #include "signal.hpp"
@@ -85,7 +86,11 @@ Real analyse_track(GpxReader&                 reader,
     // Peak efforts (with timestamps) and quadrant analysis (force vs cadence).
     static const std::vector<Long> kPeakDurations = {
         5, 15, 30, 60, 300, 600, 1200, 1800, 3600};
-    io::print_peaks(peaks::best_efforts(track, pa, kPeakDurations));
+    const std::vector<peaks::PeakEffort> peak_efforts =
+        peaks::best_efforts(track, pa, kPeakDurations);
+    io::print_peaks(peak_efforts);
+    io::print_profile(
+        profile::analyse(peak_efforts, opts.ftp_w, opts.body_mass_kg));
 
     // Durations long enough for fatigue to show, against work levels a long
     // ride passes through. Short rides drop the thresholds they never reach.

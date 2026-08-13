@@ -1,6 +1,7 @@
 #include "file_view.hpp"
 
 #include "durability_chart.hpp"
+#include "profile_chart.hpp"
 #include "panel.hpp"
 #include "paths.hpp"
 #include "signal_view.hpp"
@@ -52,7 +53,7 @@ std::size_t section_end(const std::string& report, const std::string& header) {
 constexpr float kAxisLabelGutter = 10.0f;
 
 /// Which chart a cut in the report text calls for.
-enum class ReportChart { Hills, Zones, Cadence, Peaks, Durability };
+enum class ReportChart { Hills, Zones, Cadence, Peaks, Profile, Durability };
 
 /// A point in the report text, and the chart that belongs there.
 struct ChartCut {
@@ -71,6 +72,7 @@ std::vector<ChartCut> find_chart_cuts(const std::string& report) {
         {"=== Time in power zones",  ReportChart::Zones},
         {"=== Time in cadence zones", ReportChart::Cadence},
         {"=== Peak power efforts",   ReportChart::Peaks},
+        {"=== Rider profile",        ReportChart::Profile},
         {"=== Fatigue resistance",   ReportChart::Durability},
     };
 
@@ -451,6 +453,20 @@ void FileView::draw_peaks_panel(float width) {
 }
 
 // One elevation profile per detected climb, with a shared x-axis choice.
+void FileView::draw_profile_panel(float width) {
+    if (result_.tracks.empty()) return;
+
+    const profile::Profile& p =
+        result_.tracks[static_cast<Size>(track_)].rider_profile;
+    if (!p.valid) return;
+
+    const float height = profile_chart_height(p) + PanelScope::chrome_height() +
+                         ImGui::GetStyle().ItemSpacing.y * 2.0f;
+
+    const PanelScope panel("profile", ImVec2(width, height));
+    draw_profile_chart(p, ImGui::GetContentRegionAvail().x - kAxisLabelGutter);
+}
+
 void FileView::draw_durability_panel(float width) {
     if (result_.tracks.empty()) return;
 
@@ -562,6 +578,7 @@ void FileView::draw_report() {
             case ReportChart::Zones:   draw_zone_panel(page_w);         break;
             case ReportChart::Cadence: draw_cadence_zone_panel(page_w); break;
             case ReportChart::Peaks:      draw_peaks_panel(page_w);      break;
+            case ReportChart::Profile:    draw_profile_panel(page_w);    break;
             case ReportChart::Durability: draw_durability_panel(page_w); break;
         }
         pos = cut.at;

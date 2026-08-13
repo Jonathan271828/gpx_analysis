@@ -27,6 +27,8 @@ extern const ImVec4 kCurve;          ///< The default single-series curve.
 extern const ImVec4 kNoZone;         ///< Fill for a stretch with no power.
 extern const ImVec4 kWarning;        ///< Warnings that are not failures.
 extern const ImVec4 kError;          ///< Failures.
+extern const ImVec4 kStrength;       ///< A figure better than its reference.
+extern const ImVec4 kWeakness;       ///< A figure worse than its reference.
 
 /// @brief Draw one line of text in @p colour.
 /// @param colour Text colour.

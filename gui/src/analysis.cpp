@@ -7,6 +7,7 @@
 #include "gpx_reader.hpp"   // GpxReader, Track, PowerAnalysis
 #include "durability.hpp" // durability::analyse
 #include "peaks.hpp"        // peaks::best_efforts
+#include "profile.hpp"      // profile::analyse
 #include "wind.hpp"         // wind::obtain
 #include "zones.hpp"        // zones::power_zones
 
@@ -360,8 +361,12 @@ void collect_chart_data(const arg_parser::Options& opts, Result& result) {
         static const std::vector<Long> kPeakDurations = {
             5, 15, 30, 60, 300, 600, 1200, 1800, 3600};
 
-        for (const peaks::PeakEffort& e :
-             peaks::best_efforts(tracks[i], pa, kPeakDurations)) {
+        const std::vector<peaks::PeakEffort> peak_efforts =
+            peaks::best_efforts(tracks[i], pa, kPeakDurations);
+        tc.rider_profile =
+            profile::analyse(peak_efforts, opts.ftp_w, opts.body_mass_kg);
+
+        for (const peaks::PeakEffort& e : peak_efforts) {
             PeakBar b;
             b.duration_s     = e.duration_s;
             b.avg_power_w    = e.avg_power_w;

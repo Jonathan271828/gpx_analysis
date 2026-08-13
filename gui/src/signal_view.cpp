@@ -16,9 +16,6 @@ namespace gui {
 
 namespace {
 
-/// A little headroom so the peaks of a trace do not sit on the frame.
-constexpr double kYPadFraction = 0.05;
-
 /// Ticks read as elapsed clock time rather than a raw second count: a ride is
 /// navigated by "twenty minutes in", not by "second 1200".
 int format_time_tick(double value, char* buff, int size, void*) {
@@ -26,42 +23,17 @@ int format_time_tick(double value, char* buff, int size, void*) {
     return std::snprintf(buff, static_cast<std::size_t>(size), "%s", s.c_str());
 }
 
-struct Extent {
-    double lo = 0.0, hi = 1.0;
-};
-
-Extent value_extent(const std::vector<Real>& v) {
-    Extent e;
-    bool   any = false;
-    for (const Real x : v) {
-        if (!std::isfinite(x)) continue;
-        if (!any) { e.lo = e.hi = x; any = true; continue; }
-        e.lo = std::min(e.lo, static_cast<double>(x));
-        e.hi = std::max(e.hi, static_cast<double>(x));
-    }
-    if (!any) return e;
-
-    // A constant trace would otherwise collapse to a zero-height axis.
-    const double span = (e.hi - e.lo) > 0.0 ? (e.hi - e.lo) : std::max(1.0, std::abs(e.hi));
-    e.lo -= span * kYPadFraction;
-    e.hi += span * kYPadFraction;
-    return e;
-}
+/// A little headroom so the peaks of a trace do not sit on the frame.
+constexpr double kYPad = 0.05;
 
 /// The widest time span across every selected channel.
 Span full_span(const std::vector<channels::Channel>& channels,
-                    const std::vector<char>& selected) {
+               const std::vector<char>& selected) {
     Span r;
-    bool any = false;
     for (std::size_t i = 0; i < channels.size(); ++i) {
         if (i >= selected.size() || !selected[i] || channels[i].t_s.empty()) continue;
-        const double first = channels[i].t_s.front();
-        const double last  = channels[i].t_s.back();
-        if (!any) { r.lo = first; r.hi = last; any = true; continue; }
-        r.lo = std::min(r.lo, first);
-        r.hi   = std::max(r.hi, last);
+        r.include(channels[i].t_s.front()).include(channels[i].t_s.back());
     }
-    if (any && r.hi <= r.lo) r.hi = r.lo + 1.0;
     return r;
 }
 
@@ -96,7 +68,9 @@ void draw_signal_plots(const std::vector<channels::Channel>& channels,
                                  std::to_string(c.t_s.size()) + " samples");
 
         const std::string id = "##signal_" + c.name;
-        const Extent      y  = value_extent(c.value);
+        Span y;
+        for (const Real v : c.value) y.include(v);
+        y = y.padded(kYPad);
 
         const theme::PlotStyleScope plot_style;
         if (ImPlot::BeginPlot(id.c_str(), ImVec2(width, height),

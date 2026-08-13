@@ -1,6 +1,7 @@
 #include "durability_chart.hpp"
 
 #include "format.hpp"
+#include "span.hpp"
 #include "palette.hpp"   // series_colour
 #include "theme.hpp"
 
@@ -76,23 +77,19 @@ void draw_durability_chart(const durability::Report& report, float width) {
 
     // Ranges are set rather than fitted: ImPlot pads a fit by nothing, so the
     // highest reading would sit exactly on the frame and read as clipped.
-    double x_hi = 0.0, y_lo = 0.0, y_hi = 0.0;
-    bool   any  = false;
-    for (const Line& l : lines)
-        for (std::size_t k = 0; k < l.kj.size(); ++k) {
-            x_hi = std::max(x_hi, l.kj[k]);
-            if (!any) { y_lo = y_hi = l.watts[k]; any = true; continue; }
-            y_lo = std::min(y_lo, l.watts[k]);
-            y_hi = std::max(y_hi, l.watts[k]);
-        }
-    const double pad = std::max(1.0, (y_hi - y_lo) * 0.12);
+    Span x, y;
+    for (const Line& l : lines) {
+        for (const double kj : l.kj)     x.include(kj);
+        for (const double w  : l.watts)  y.include(w);
+    }
+    y = y.padded(0.12);
 
     const theme::PlotStyleScope plot_style;
     if (ImPlot::BeginPlot("##durability", ImVec2(width, kPlotHeight),
                           ImPlotFlags_NoTitle | ImPlotFlags_NoMouseText)) {
         ImPlot::SetupAxes("work already done (kJ)", "best power (W)");
-        ImPlot::SetupAxisLimits(ImAxis_X1, 0.0, x_hi * 1.02, ImPlotCond_Always);
-        ImPlot::SetupAxisLimits(ImAxis_Y1, y_lo - pad, y_hi + pad, ImPlotCond_Always);
+        ImPlot::SetupAxisLimits(ImAxis_X1, 0.0, x.hi * 1.02, ImPlotCond_Always);
+        ImPlot::SetupAxisLimits(ImAxis_Y1, y.lo, y.hi, ImPlotCond_Always);
 
         for (std::size_t i = 0; i < lines.size(); ++i) {
             ImPlotSpec line;

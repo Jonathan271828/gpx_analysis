@@ -38,7 +38,9 @@ add_executable(gpx_reader
     src/splits.cpp
     src/cp_model.cpp
     src/trends.cpp
+    src/ride.cpp
     src/peaks.cpp
+    src/profile.cpp
     src/durability.cpp
     src/quadrant.cpp
 )

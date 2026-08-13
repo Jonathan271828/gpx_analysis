@@ -72,6 +72,7 @@ private:
     void draw_hill_panel(float width);
     void draw_peaks_panel(float width);
     void draw_durability_panel(float width);
+    void draw_profile_panel(float width);
 
     float draw_spectral_controls();
     void  draw_channel_picker();

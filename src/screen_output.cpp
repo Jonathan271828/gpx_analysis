@@ -448,4 +448,63 @@ void print_durability(const durability::Report& r) {
                  "reached;\n"
                  "  a large fade at long durations is the signature that matters.\n\n";
 }
+// ---------------------------------------------------------------------------
+// print_profile — the shape of the power-duration curve
+// ---------------------------------------------------------------------------
+
+void print_profile(const profile::Profile& p) {
+    if (!p.valid) return;
+
+    std::cout << "=== Rider profile"
+              << (p.measured ? " (measured)" : " (estimated)")
+              << ", against " << std::fixed << std::setprecision(0)
+              << p.threshold_w << " W threshold ===\n"
+              << "  " << std::setw(7) << "Effort"
+              << "  " << std::setw(7) << "Power"
+              << "  " << std::setw(8) << "W/kg"
+              << "  " << std::setw(9) << "x thresh"
+              << "  " << std::setw(9) << "balanced"
+              << "  " << "vs your own balance\n";
+
+    static const char* kLabels[] = {"5 s", "1 min", "5 min", "20 min"};
+    Size k = 0;
+    for (const profile::Point& pt : p.points) {
+        const char* label = (k < 4) ? kLabels[k] : "";
+        ++k;
+        if (!pt.found) {
+            std::cout << "  " << std::setw(7) << label << "  " << "      -\n";
+            continue;
+        }
+        std::ostringstream rel;
+        rel << std::showpos << std::fixed << std::setprecision(0)
+            << (pt.shape - 1.0) * 100.0 << " %";
+
+        std::cout << "  " << std::setw(7) << label
+                  << "  " << std::setprecision(0) << std::setw(5) << pt.watts << " W";
+        if (pt.wkg > 0.0)
+            std::cout << "  " << std::setprecision(2) << std::setw(4) << pt.wkg << " W/kg";
+        else
+            std::cout << "  " << std::setw(8) << "-";
+        std::cout << "  " << std::setprecision(2) << std::setw(9) << pt.ratio
+                  << "  " << std::setw(9) << pt.reference
+                  << "  " << std::setw(6) << rel.str() << "\n";
+    }
+
+    std::cout << "  Profile        : " << profile::phenotype_name(p.phenotype) << "\n";
+    if (!p.strength.empty())
+        std::cout << "  Strongest      : " << p.strength
+                  << "   weakest: " << p.weakness << "\n";
+    const std::string advice = profile::phenotype_advice(p.phenotype);
+    if (!advice.empty())
+        std::cout << "  " << advice << "\n";
+    if (p.suggested_threshold_w > 0.0)
+        std::cout << "  Threshold check: this ride's 20 min implies about "
+                  << std::setprecision(0) << p.suggested_threshold_w
+                  << " W, not " << p.threshold_w
+                  << " W. The shape above is unaffected; the W/kg column is not.\n";
+    if (!p.caveat.empty())
+        std::cout << "  Note: " << p.caveat << ".\n";
+    std::cout << "\n";
+}
+
 } // namespace io

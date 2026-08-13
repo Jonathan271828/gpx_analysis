@@ -13,6 +13,8 @@ const ImVec4 kCurve         = ImVec4(0.224f, 0.529f, 0.898f, 1.00f);  // #3987e5
 const ImVec4 kNoZone        = ImVec4(0.600f, 0.600f, 0.580f, 1.00f);
 const ImVec4 kWarning       = ImVec4(0.950f, 0.750f, 0.250f, 1.00f);
 const ImVec4 kError         = ImVec4(1.000f, 0.450f, 0.400f, 1.00f);
+const ImVec4 kStrength      = ImVec4(0.235f, 0.702f, 0.443f, 1.00f);
+const ImVec4 kWeakness      = ImVec4(0.902f, 0.494f, 0.133f, 1.00f);
 
 void text_coloured(const ImVec4& colour, const std::string& s) {
     ImGui::PushStyleColor(ImGuiCol_Text, colour);

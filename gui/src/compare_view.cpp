@@ -16,7 +16,7 @@ namespace gui {
 namespace {
 
 /// A little headroom so the peaks of a trace do not sit on the frame.
-constexpr double kYPadFraction = 0.05;
+constexpr double kYPad = 0.05;
 
 int format_distance_tick(double value, char* buff, int size, void*) {
     return std::snprintf(buff, static_cast<std::size_t>(size), "%.4g km", value);
@@ -99,31 +99,16 @@ ChannelTraces gather(const std::vector<CompareRide>& rides,
 
 Span x_extent(const ChannelTraces& ct) {
     Span s;
-    bool any = false;
-    for (const Trace& t : ct.traces) {
-        if (t.x.empty()) continue;
-        if (!any) { s.lo = t.x.front(); s.hi = t.x.back(); any = true; continue; }
-        s.lo = std::min(s.lo, t.x.front());
-        s.hi = std::max(s.hi, t.x.back());
-    }
+    for (const Trace& t : ct.traces)
+        if (!t.x.empty()) s.include(t.x.front()).include(t.x.back());
     return s;
 }
 
 Span y_extent(const ChannelTraces& ct) {
     Span s;
-    bool any = false;
     for (const Trace& t : ct.traces)
-        for (const double v : t.y) {
-            if (!std::isfinite(v)) continue;
-            if (!any) { s.lo = s.hi = v; any = true; continue; }
-            s.lo = std::min(s.lo, v);
-            s.hi = std::max(s.hi, v);
-        }
-    if (!any) return {0.0, 1.0};
-
-    const double range = (s.hi - s.lo) > 0.0 ? (s.hi - s.lo)
-                                             : std::max(1.0, std::abs(s.hi));
-    return {s.lo - range * kYPadFraction, s.hi + range * kYPadFraction};
+        for (const double v : t.y) s.include(v);
+    return s.set ? s.padded(kYPad) : Span{}.include(0.0).include(1.0);
 }
 
 /// The whole comparison's x extent, so every plot shares one span.
@@ -131,14 +116,9 @@ Span overall_extent(const std::vector<CompareRide>& rides,
                     const std::vector<std::string>& names,
                     const std::vector<char>& selected, CompareAxis axis) {
     Span s;
-    bool any = false;
     for (std::size_t n = 0; n < names.size(); ++n) {
         if (n >= selected.size() || !selected[n]) continue;
-        const Span e = x_extent(gather(rides, names[n], axis));
-        if (e.empty()) continue;
-        if (!any) { s = e; any = true; continue; }
-        s.lo = std::min(s.lo, e.lo);
-        s.hi = std::max(s.hi, e.hi);
+        s.include(x_extent(gather(rides, names[n], axis)));
     }
     return s;
 }
