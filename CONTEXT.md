@@ -1,4 +1,4 @@
-# gpx_analysis — Project Context
+# GPXAna — Project Context
 
 This file is intended to be read at the start of a new development session to
 quickly restore full context about the project without re-reading all source
@@ -8,7 +8,8 @@ files from scratch.
 
 ## Purpose
 
-`gpx_reader` is a C++17 command-line tool that parses GPX 1.1 files (e.g.
+GPXAna is a C++17 toolkit built around `gpx_reader`, a command-line tool that
+parses GPX 1.1 files (e.g.
 Garmin Connect exports) and computes:
 
 - Overall track statistics (distance, elevation, speed, gradients, temperature,

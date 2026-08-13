@@ -1,8 +1,9 @@
-# gpx_reader
+# GPXAna
 
-A C++17 command-line tool that parses GPX files and computes track statistics,
-detects hills, and finds the fastest segment over a user-defined distance or
-time window.
+A C++17 toolkit for analysing cycling GPX files: track statistics, hill
+detection, a physics-based power estimate, training metrics, and the
+autocorrelation and power spectrum of every recorded channel. Ships as a
+command-line tool (`gpx_reader`) and an optional desktop GUI (`gpxana_gui`).
 
 ## Features
 
