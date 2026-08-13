@@ -6,7 +6,7 @@ PROJECT_BRIEF          = "GPX ride analysis: stats, power, training metrics"
 OUTPUT_DIRECTORY       = docs
 
 # Inputs: the source tree (flat) plus the README as the landing page.
-INPUT                  = src README.md
+INPUT                  = src gui/src README.md
 FILE_PATTERNS          = *.hpp *.cpp *.md
 RECURSIVE              = NO
 USE_MDFILE_AS_MAINPAGE = README.md

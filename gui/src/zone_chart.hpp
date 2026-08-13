@@ -20,6 +20,8 @@ void draw_zone_chart(const zones::ZoneTable& table);
 /// @brief Height in pixels that draw_zone_chart() needs for @p table.
 /// Call inside the same frame and style as the draw, so a caller sizing a panel
 /// around the chart cannot drift from the chart's own layout.
+/// @param table The distribution the chart would draw.
+/// @return The height in pixels; 0 when @p table is invalid.
 float zone_chart_height(const zones::ZoneTable& table);
 
 } // namespace gui

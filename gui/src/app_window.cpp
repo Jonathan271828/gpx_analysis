@@ -55,12 +55,8 @@ void AppWindow::load(const std::string& path) {
     if (path.empty()) return;
     path_ = path;
 
-    // Default the cache beside the ride, so ticking "cached" is enough: the
-    // first load fetches and writes it, later loads read it back offline.
-    if (wind_path_.empty()) wind_path_ = path + ".wind.json";
-
     result_ = analyse(path, static_cast<std::size_t>(max_print_ < 0 ? 0 : max_print_),
-                      wind_src_, wind_path_);
+                      wind_on_);
     track_  = 0;
     reset_channel_selection();   // transforms belong to the file that produced them
 }
@@ -460,45 +456,15 @@ void AppWindow::draw_toolbar() {
         load(path_);   // re-run so the report reflects the new setting
     }
 
-    draw_wind_controls();
-}
-
-// Mirrors the CLI's --wind-cache / --wind-file. Without a headwind term the
-// estimated power differs from a run that had one -- and so does everything
-// derived from it, the power spectrum included -- so this has to be reachable
-// from the GUI for its charts to be comparable with the command line's output.
-void AppWindow::draw_wind_controls() {
-    static const char* kLabels[] = {"off", "cached (fetches once)", "local JSON file"};
-    int mode = static_cast<int>(wind_src_);
-
-    ImGui::TextUnformatted("Wind:");
-    if (ImGui::IsItemHovered())
-        ImGui::SetTooltip(
-            "Historical wind from Open-Meteo, applied to the aero term.\n"
-            "'cached' fetches once over the network and stores the JSON;\n"
-            "'local JSON file' only reads and never goes online.");
-
+    // Mirrors the command line's --wind. Off by default because it is the only
+    // control that reaches the network; ticking it re-runs the analysis, since
+    // the headwind term changes estimated power and all that follows from it.
     ImGui::SameLine();
-    ImGui::SetNextItemWidth(190.0f);
-    if (ImGui::Combo("##windmode", &mode, kLabels, IM_ARRAYSIZE(kLabels))) {
-        wind_src_ = static_cast<WindSource>(mode);
-        load(path_);   // power, and everything derived from it, changes
-    }
-
-    if (wind_src_ == WindSource::Off) return;
-
-    ImGui::SameLine();
-    char buf[1024];
-    std::snprintf(buf, sizeof buf, "%s", wind_path_.c_str());
-    ImGui::SetNextItemWidth(360.0f);
-    if (ImGui::InputText("##windpath", buf, IM_ARRAYSIZE(buf),
-                         ImGuiInputTextFlags_EnterReturnsTrue)) {
-        wind_path_ = buf;
-        load(path_);
-    }
+    if (ImGui::Checkbox("wind", &wind_on_)) load(path_);
     if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("Open-Meteo JSON path; press Enter to re-run.\n"
-                          "A multi-track file gets a per-track suffix.");
+        ImGui::SetTooltip("Fetch historical wind from Open-Meteo and apply it to\n"
+                          "the aero term, as the command line's --wind does.\n"
+                          "Leaves the network alone while unticked.");
 }
 
 void AppWindow::draw_banner() {

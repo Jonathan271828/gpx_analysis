@@ -24,6 +24,7 @@ void draw_hill_chart(const HillProfile& hill, int index, HillAxis axis,
                      const zones::ZoneTable& zones, float width);
 
 /// @brief Height in pixels that draw_hill_chart() needs.
+/// @return The height of one climb plot, heading included.
 float hill_chart_height();
 
 } // namespace gui

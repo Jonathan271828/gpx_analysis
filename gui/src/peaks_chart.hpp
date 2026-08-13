@@ -23,6 +23,8 @@ void draw_peaks_chart(const std::vector<PeakBar>& peaks,
                       const zones::ZoneTable& zones);
 
 /// @brief Height in pixels that draw_peaks_chart() needs for @p peaks.
+/// @param peaks The efforts the chart would draw.
+/// @return The height in pixels; 0 when @p peaks is empty.
 float peaks_chart_height(const std::vector<PeakBar>& peaks);
 
 /// @brief What the hold curve measures power against.
@@ -46,6 +48,7 @@ void draw_hold_curve(const std::vector<PeakBar>& peaks, Real ftp_w,
                      HoldRef ref, float width);
 
 /// @brief Height in pixels that draw_hold_curve() needs.
+/// @return The plot height, axis labels included.
 float hold_curve_height();
 
 } // namespace gui

@@ -258,9 +258,9 @@ void collect_chart_data(const arg_parser::Options& opts, Result& result) {
     result.tracks.resize(tracks.size());
 
     for (Size i = 0; i < tracks.size(); ++i) {
-        // Same acquisition app::run() does before its own estimate_power, so the
-        // charts and the text report describe one ride, not two. With
-        // wind_mode == Off this is a no-op and no network request is made.
+        // The same acquisition app::run() performs before its own
+        // estimate_power, so the charts and the text report describe one ride.
+        // With wind_mode == Off this is a no-op and nothing is fetched.
         const WindData  w  = wind::obtain(opts.wind_mode, opts.wind_path,
                                           tracks[i], i, tracks.size());
         const WindData* wp = w.valid ? &w : nullptr;
@@ -305,7 +305,7 @@ void collect_chart_data(const arg_parser::Options& opts, Result& result) {
 } // namespace
 
 Result analyse(const std::string& gpx_path, std::size_t max_print,
-               WindSource wind_src, const std::string& wind_path) {
+               bool use_wind) {
     Result result;
 
     // Build the options the same way the command line does, by handing a
@@ -316,13 +316,9 @@ Result analyse(const std::string& gpx_path, std::size_t max_print,
     std::vector<std::string> args = {
         "gpxana_gui", gpx_path, "--points", std::to_string(max_print)};
 
-    // Wind goes in as the flag the CLI parses, so wind_mode/wind_path are
-    // resolved by the same code and the report matches a command line run.
-    if (wind_src != WindSource::Off && !wind_path.empty()) {
-        args.push_back(wind_src == WindSource::Cache ? "--wind-cache"
-                                                     : "--wind-file");
-        args.push_back(wind_path);
-    }
+    // Goes in as the flag the command line parses, so wind_mode is resolved by
+    // the same code and the report matches a `--wind` run exactly.
+    if (use_wind) args.push_back("--wind");
 
     std::vector<char*> argv;
     argv.reserve(args.size());
@@ -340,8 +336,7 @@ Result analyse(const std::string& gpx_path, std::size_t max_print,
 
     // Every export path is left empty and a single input file means no
     // multi-ride trend, so run() only prints its report. The wind flag above is
-    // the one thing that can touch the disk or the network, and only when the
-    // user has asked for it.
+    // the one thing that reaches the network, and only when asked for.
 
     int         status = EXIT_FAILURE;
     std::string thrown;

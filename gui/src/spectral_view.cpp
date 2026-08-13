@@ -38,6 +38,36 @@ int acf_count(const signal::SpectralResult& r) {
     return static_cast<int>(std::min(r.acf.size(), r.n_samples));
 }
 
+// A lag in seconds, with the minutes reading alongside once it passes a minute.
+// Ride structure repeats on the scale of minutes, and "1830 s" is harder to
+// place than "30:30".
+std::string format_lag(double s) {
+    char buf[64];
+    if (s < 60.0) {
+        std::snprintf(buf, sizeof buf, "%.1f s", s);
+        return buf;
+    }
+    const long t = static_cast<long>(s + 0.5);
+    std::snprintf(buf, sizeof buf, "%.0f s  (%ld:%02ld)", s, t / 60, t % 60);
+    return buf;
+}
+
+// Where the cursor is, in the plot's own coordinates. Both spectral plots carry
+// ImPlotFlags_NoMouseText, so this replaces ImPlot's unlabelled corner readout
+// with a tooltip that names the axes and carries their units.
+//
+// The position is the cursor's, not the nearest sample's: at these densities --
+// 8193 bins across the frequency axis, thousands of lags -- snapping would move
+// the readout by less than a pixel while hiding where the pointer actually is.
+void position_tooltip(const char* x_line, const char* y_line) {
+    if (!ImGui::BeginTooltip()) return;
+    ImGui::TextUnformatted(x_line);
+    ImGui::PushStyleColor(ImGuiCol_Text, kTextSecondary);
+    ImGui::TextUnformatted(y_line);
+    ImGui::PopStyleColor();
+    ImGui::EndTooltip();
+}
+
 // The PSD of a channel measured in `unit` is in unit^2/Hz. A compound unit needs
 // brackets to say so: "km/h^2/Hz" reads as hours squared.
 std::string unit_squared(const std::string& unit) {
@@ -153,6 +183,14 @@ void draw_acf_plot(const std::vector<Spectrum>& spectra, bool full_lag,
             ImPlot::PlotLine(spectra[i].name.c_str(), r.lag_s.data(), r.acf.data(),
                              n, line);
         }
+
+        if (ImPlot::IsPlotHovered()) {
+            const ImPlotPoint m = ImPlot::GetPlotMousePos();
+            char xl[64], yl[64];
+            std::snprintf(xl, sizeof xl, "lag  %s", format_lag(m.x).c_str());
+            std::snprintf(yl, sizeof yl, "autocorrelation  %+.4f", m.y);
+            position_tooltip(xl, yl);
+        }
         ImPlot::EndPlot();
     }
     ImPlot::PopStyleColor(3);
@@ -210,6 +248,21 @@ void draw_psd_plots(const std::vector<Spectrum>& spectra, bool refit,
             line.LineWeight = 2.0f;
             ImPlot::PlotLine(s.name.c_str(), r.freq_hz.data(), r.psd.data(),
                              n, line);
+
+            if (ImPlot::IsPlotHovered()) {
+                const ImPlotPoint m = ImPlot::GetPlotMousePos();
+                char xl[96], yl[96];
+                // The period is the same reading as the frequency, in the units
+                // the autocorrelation tab uses, so a feature can be matched
+                // between the two tabs without arithmetic in your head.
+                if (m.x > 0.0)
+                    std::snprintf(xl, sizeof xl, "%.6g Hz   (period %s)",
+                                  m.x, format_lag(1.0 / m.x).c_str());
+                else
+                    std::snprintf(xl, sizeof xl, "%.6g Hz", m.x);
+                std::snprintf(yl, sizeof yl, "%.6g %s", m.y, unit2.c_str());
+                position_tooltip(xl, yl);
+            }
             ImPlot::EndPlot();
         }
         ImPlot::PopStyleColor(3);

@@ -92,29 +92,16 @@ struct Result {
     std::vector<TrackCharts> tracks;
 };
 
-/// @brief Where the analysis should get wind data, mirroring the CLI's
-/// --wind-cache / --wind-file. Without wind the aero term carries no headwind,
-/// which changes estimated power and everything derived from it.
-///
-/// The CLI's plain --wind (fetch every run) is deliberately not offered: the
-/// report and the charts each acquire wind once, so a non-caching fetch would
-/// hit the network twice per load.
-enum class WindSource {
-    Off,    ///< No wind applied (the default).
-    Cache,  ///< Fetch from Open-Meteo once, cache to disk, reuse thereafter.
-    File    ///< Read a local Open-Meteo JSON file; never touches the network.
-};
-
 /// @brief Analyse one GPX file and capture the report it prints.
 /// @param gpx_path  Path to the .gpx file to analyse.
 /// @param max_print Track points to list first (0 suppresses that section).
-/// @param wind      Where to source wind data.
-/// @param wind_path Cache/file path used when @p wind is not Off.
-/// @return The captured report. With @p wind Off no files are written and no
-///         network request is made. Cache writes @p wind_path and may fetch
-///         from Open-Meteo; File only reads.
+/// @param use_wind  Pass the command line's `--wind`: fetch historical wind from
+///                  Open-Meteo and apply it to the aero term. Off by default,
+///                  and the only thing here that touches the network.
+/// @return The captured report. No files are written; with @p use_wind false no
+///         network request is made either, since every export path is left
+///         empty and a single input file means no multi-ride trend.
 Result analyse(const std::string& gpx_path, std::size_t max_print,
-               WindSource wind = WindSource::Off,
-               const std::string& wind_path = std::string());
+               bool use_wind = false);
 
 } // namespace gui
