@@ -1,10 +1,13 @@
 #include "app_window.hpp"
 
 #include "file_dialog.hpp"
+#include "panel.hpp"
+#include "paths.hpp"
 #include "file_output.hpp"   // io::write_spectral_file
 #include "palette.hpp"
 #include "peaks_chart.hpp"
 #include "spectral_view.hpp"
+#include "theme.hpp"
 #include "zone_chart.hpp"
 
 #include "imgui.h"
@@ -19,12 +22,6 @@
 namespace gui {
 
 namespace {
-
-// "rides/morning.gpx" -> "morning.gpx"
-std::string basename_of(const std::string& path) {
-    const std::string::size_type slash = path.find_last_of('/');
-    return (slash == std::string::npos) ? path : path.substr(slash + 1);
-}
 
 // Offset just past the end of the report section starting with `header`, so a
 // chart can be inserted directly below that section's table.
@@ -47,6 +44,41 @@ std::size_t section_end(const std::string& report, const std::string& header) {
         nl = report.find('\n', line);
     }
     return report.size();
+}
+
+// ImPlot draws y-axis labels outside the plot frame; the panels reserve this
+// much of their width so those labels are not clipped by the panel border.
+constexpr float kAxisLabelGutter = 10.0f;
+
+/// Which chart a cut in the report text calls for.
+enum class ReportChart { Hills, Zones, Peaks };
+
+/// A point in the report text, and the chart that belongs there.
+struct ChartCut {
+    std::size_t at    = 0;
+    ReportChart chart = ReportChart::Hills;
+};
+
+/// Locate the end of each illustrated section, in the order they appear.
+///
+/// Sorting by position rather than trusting the search order means the text is
+/// emitted in one pass regardless of how the report happens to be laid out, and
+/// a report missing a section simply contributes no cut.
+std::vector<ChartCut> find_chart_cuts(const std::string& report) {
+    static const std::pair<const char*, ReportChart> kSections[] = {
+        {"--- Hills",                ReportChart::Hills},
+        {"=== Time in power zones",  ReportChart::Zones},
+        {"=== Peak power efforts",   ReportChart::Peaks},
+    };
+
+    std::vector<ChartCut> cuts;
+    for (const auto& [header, chart] : kSections) {
+        const std::size_t at = section_end(report, header);
+        if (at != std::string::npos) cuts.push_back({at, chart});
+    }
+    std::sort(cuts.begin(), cuts.end(),
+              [](const ChartCut& a, const ChartCut& b) { return a.at < b.at; });
+    return cuts;
 }
 
 } // namespace
@@ -150,9 +182,7 @@ void AppWindow::compute_spectra() {
 void AppWindow::dump_spectra() {
     if (spectra_.empty()) return;
 
-    const std::string::size_type slash = path_.find_last_of('/');
-    const std::string dir = (slash == std::string::npos)
-                                ? std::string() : path_.substr(0, slash + 1);
+    const std::string dir = paths::directory_of(path_);
 
     std::string note;
     for (const Spectrum& s : spectra_) {
@@ -214,6 +244,18 @@ float AppWindow::draw_spectral_controls() {
         return page_w;
     }
 
+    draw_channel_picker();
+    draw_transform_controls();
+
+    if (!spectral_note_.empty())
+        theme::text_coloured(theme::kWarning, spectral_note_);
+
+    ImGui::Separator();
+    return page_w;
+}
+
+// One checkbox per channel the track carries, on a single line.
+void AppWindow::draw_channel_picker() {
     const std::vector<channels::Channel>& ch =
         result_.tracks[static_cast<Size>(track_)].channels;
     if (chan_on_.size() != ch.size()) reset_channel_selection();
@@ -228,7 +270,10 @@ float AppWindow::draw_spectral_controls() {
                               ch[i].name.c_str(), ch[i].unit.c_str(),
                               ch[i].t_s.size());
     }
+}
 
+// The resample interval, the button that runs the transform, and what came of it.
+void AppWindow::draw_transform_controls() {
     // Mirrors the CLI's --acf-dt: 0 lets the transform pick the median interval.
     ImGui::SetNextItemWidth(120.0f);
     ImGui::InputFloat("resample dt (s), 0 = auto", &acf_dt_, 0.0f, 0.0f, "%.2f");
@@ -237,27 +282,18 @@ float AppWindow::draw_spectral_controls() {
     ImGui::SameLine();
     if (ImGui::Button("Compute")) compute_spectra();
 
-    if (!spectra_.empty()) {
-        ImGui::SameLine();
-        if (ImGui::Button("Dump to .dat")) dump_spectra();
-        if (ImGui::IsItemHovered())
-            ImGui::SetTooltip("Write these spectra beside the GPX as\n"
-                              "<channel>.gui.acf.dat, in the same format the\n"
-                              "command line's --acf-* flags produce.");
+    if (spectra_.empty()) return;
 
-        ImGui::SameLine();
-        ImGui::TextDisabled("(%zu computed at dt = %.3g s)", spectra_.size(),
-                            spectra_.front().result.dt_s);
-    }
+    ImGui::SameLine();
+    if (ImGui::Button("Dump to .dat")) dump_spectra();
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Write these spectra beside the GPX as\n"
+                          "<channel>.gui.acf.dat, in the same format the\n"
+                          "command line's --acf-* flags produce.");
 
-    if (!spectral_note_.empty()) {
-        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.75f, 0.25f, 1.0f));
-        ImGui::TextUnformatted(spectral_note_.c_str());
-        ImGui::PopStyleColor();
-    }
-
-    ImGui::Separator();
-    return page_w;
+    ImGui::SameLine();
+    ImGui::TextDisabled("(%zu computed at dt = %.3g s)", spectra_.size(),
+                        spectra_.front().result.dt_s);
 }
 
 void AppWindow::draw_acf_tab() {
@@ -299,20 +335,11 @@ void AppWindow::draw_zone_panel(float width) {
 
     const zones::ZoneTable& table =
         result_.tracks[static_cast<Size>(track_)].power_zones;
-    const float height = zone_chart_height(table) +
-                         ImGui::GetStyle().WindowPadding.y * 2.0f +
-                         ImGui::GetStyle().ItemSpacing.y * 2.0f + 4.0f;
+    const float height = zone_chart_height(table) + PanelScope::chrome_height() +
+                         ImGui::GetStyle().ItemSpacing.y * 2.0f;
 
-    ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.102f, 0.102f, 0.098f, 1.0f));
-    ImGui::BeginChild("zones", ImVec2(width, height), ImGuiChildFlags_Borders);
-    ImGui::Dummy(ImVec2(0.0f, 4.0f));
-    ImGui::Indent(10.0f);
+    const PanelScope panel("zones", ImVec2(width, height));
     draw_zone_chart(table);
-    ImGui::Unindent(10.0f);
-    ImGui::EndChild();
-    ImGui::PopStyleColor();
-
-    ImGui::Dummy(ImVec2(0.0f, 8.0f));
 }
 
 void AppWindow::draw_peaks_panel(float width) {
@@ -324,13 +351,10 @@ void AppWindow::draw_peaks_panel(float width) {
     const float height = peaks_chart_height(tc.peaks) +
                          hold_curve_height() +
                          ImGui::GetTextLineHeightWithSpacing() * 2.0f +
-                         ImGui::GetStyle().WindowPadding.y * 2.0f +
-                         ImGui::GetStyle().ItemSpacing.y * 4.0f + 10.0f;
+                         PanelScope::chrome_height() +
+                         ImGui::GetStyle().ItemSpacing.y * 4.0f + 6.0f;
 
-    ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.102f, 0.102f, 0.098f, 1.0f));
-    ImGui::BeginChild("peaks", ImVec2(width, height), ImGuiChildFlags_Borders);
-    ImGui::Dummy(ImVec2(0.0f, 4.0f));
-    ImGui::Indent(10.0f);
+    const PanelScope panel("peaks", ImVec2(width, height));
     draw_peaks_chart(tc.peaks, tc.power_zones);
 
     // The same efforts read the other way round: how long each fraction of the
@@ -347,13 +371,7 @@ void AppWindow::draw_peaks_panel(float width) {
     if (tc.ftp_w <= 0.0) ImGui::EndDisabled();
 
     draw_hold_curve(tc.peaks, tc.ftp_w, hold_ref_,
-                    ImGui::GetContentRegionAvail().x - 10.0f);
-
-    ImGui::Unindent(10.0f);
-    ImGui::EndChild();
-    ImGui::PopStyleColor();
-
-    ImGui::Dummy(ImVec2(0.0f, 8.0f));
+                    ImGui::GetContentRegionAvail().x - kAxisLabelGutter);
 }
 
 // One elevation profile per detected climb, with a shared x-axis choice.
@@ -373,12 +391,9 @@ void AppWindow::draw_hill_panel(float width) {
     const float height = ImGui::GetTextLineHeightWithSpacing() * 2.0f +
                          hill_chart_height() * rows +
                          ImGui::GetStyle().ItemSpacing.y * rows +
-                         ImGui::GetStyle().WindowPadding.y * 2.0f + 6.0f;
+                         PanelScope::chrome_height() + 2.0f;
 
-    ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.102f, 0.102f, 0.098f, 1.0f));
-    ImGui::BeginChild("hills", ImVec2(width, height), ImGuiChildFlags_Borders);
-    ImGui::Dummy(ImVec2(0.0f, 4.0f));
-    ImGui::Indent(10.0f);
+    const PanelScope panel("hills", ImVec2(width, height));
 
     ImGui::TextUnformatted("Climb profiles      x axis:");
     ImGui::SameLine();
@@ -403,15 +418,9 @@ void AppWindow::draw_hill_panel(float width) {
     }
 
     // Leave room for the y-axis labels ImPlot draws outside the plot frame.
-    const float plot_w = ImGui::GetContentRegionAvail().x - 10.0f;
+    const float plot_w = ImGui::GetContentRegionAvail().x - kAxisLabelGutter;
     for (Size i = 0; i < hills.size(); ++i)
         draw_hill_chart(hills[i], static_cast<int>(i), hill_axis_, zt, plot_w);
-
-    ImGui::Unindent(10.0f);
-    ImGui::EndChild();
-    ImGui::PopStyleColor();
-
-    ImGui::Dummy(ImVec2(0.0f, 8.0f));
 }
 
 void AppWindow::draw_toolbar() {
@@ -438,7 +447,7 @@ void AppWindow::draw_toolbar() {
         return;
     }
 
-    ImGui::Text("%s", basename_of(path_).c_str());
+    ImGui::Text("%s", paths::basename_of(path_).c_str());
     if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", path_.c_str());
 
     ImGui::SameLine();
@@ -470,8 +479,7 @@ void AppWindow::draw_toolbar() {
 void AppWindow::draw_banner() {
     if (result_.errors.empty()) return;
 
-    const ImVec4 colour = result_.ok ? ImVec4(0.95f, 0.75f, 0.25f, 1.0f)   // warning
-                                     : ImVec4(1.00f, 0.45f, 0.40f, 1.0f);  // error
+    const ImVec4 colour = result_.ok ? theme::kWarning : theme::kError;
     ImGui::PushStyleColor(ImGuiCol_Text, colour);
     ImGui::TextUnformatted(result_.errors.c_str());
     ImGui::PopStyleColor();
@@ -496,16 +504,7 @@ void AppWindow::draw_report() {
     const float page_w = ImGui::GetWindowWidth() - style.WindowPadding.x * 2.0f -
                          style.ScrollbarSize;
 
-    // A file with several tracks gets one selector for every chart on the page.
-    if (result_.tracks.size() > 1) {
-        if (track_ >= static_cast<int>(result_.tracks.size())) track_ = 0;
-        ImGui::SetNextItemWidth(160.0f);
-        ImGui::SliderInt("track (charts)", &track_, 0,
-                         static_cast<int>(result_.tracks.size()) - 1);
-        ImGui::Spacing();
-    } else {
-        track_ = 0;
-    }
+    draw_track_selector();
 
     // The report is column-aligned plain text (hills, splits and peak tables),
     // so it is shown verbatim in ImGui's fixed-width default font. Charts are
@@ -518,36 +517,33 @@ void AppWindow::draw_report() {
 
     const std::string& r = result_.summary;
 
-    enum Chart { kHills, kZones, kPeaks };
-    struct Cut { std::size_t at; Chart what; };
-
-    // Each chart goes directly below the section it illustrates. The cuts are
-    // sorted by position so the text is emitted in order regardless of how the
-    // report happens to be laid out.
-    Cut cuts[3];
-    int n = 0;
-    for (const auto& [header, what] :
-         {std::pair<const char*, Chart>{"--- Hills", kHills},
-          std::pair<const char*, Chart>{"=== Time in power zones", kZones},
-          std::pair<const char*, Chart>{"=== Peak power efforts", kPeaks}}) {
-        const std::size_t at = section_end(r, header);
-        if (at != std::string::npos) cuts[n++] = {at, what};
-    }
-    std::sort(cuts, cuts + n, [](const Cut& a, const Cut& b) { return a.at < b.at; });
-
     std::size_t pos = 0;
-    for (int i = 0; i < n; ++i) {
-        ImGui::TextUnformatted(r.c_str() + pos, r.c_str() + cuts[i].at);
-        switch (cuts[i].what) {
-            case kHills: draw_hill_panel(page_w);  break;
-            case kZones: draw_zone_panel(page_w);  break;
-            case kPeaks: draw_peaks_panel(page_w); break;
+    for (const ChartCut& cut : find_chart_cuts(r)) {
+        ImGui::TextUnformatted(r.c_str() + pos, r.c_str() + cut.at);
+        switch (cut.chart) {
+            case ReportChart::Hills: draw_hill_panel(page_w);  break;
+            case ReportChart::Zones: draw_zone_panel(page_w);  break;
+            case ReportChart::Peaks: draw_peaks_panel(page_w); break;
         }
-        pos = cuts[i].at;
+        pos = cut.at;
     }
     ImGui::TextUnformatted(r.c_str() + pos, r.c_str() + r.size());
 
     ImGui::EndChild();
+}
+
+// A file with several tracks gets one selector driving every chart on the page.
+void AppWindow::draw_track_selector() {
+    if (result_.tracks.size() <= 1) {
+        track_ = 0;
+        return;
+    }
+    if (track_ >= static_cast<int>(result_.tracks.size())) track_ = 0;
+
+    ImGui::SetNextItemWidth(160.0f);
+    ImGui::SliderInt("track (charts)", &track_, 0,
+                     static_cast<int>(result_.tracks.size()) - 1);
+    ImGui::Spacing();
 }
 
 } // namespace gui

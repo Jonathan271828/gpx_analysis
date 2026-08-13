@@ -41,6 +41,15 @@ void zone_swatch(std::size_t index);
 /// @param table Supplies the labels and bounds; nothing is drawn if invalid.
 void draw_zone_legend(const zones::ZoneTable& table);
 
+/// @brief The zone's bounds as text, e.g. "168-229 W" or "458+ W".
+///
+/// Lives here with the rest of the zone presentation because two charts and
+/// the legend all need it, and had each formatted it themselves.
+/// @param zone The zone.
+/// @param unit Unit to append, e.g. "W" or "bpm".
+/// @return The formatted bounds; an open-topped zone reads as "<lo>+ <unit>".
+std::string zone_bounds_text(const zones::Zone& zone, const std::string& unit);
+
 /// @brief The zone's full name, e.g. "Z4 Threshold".
 /// @param table The distribution the zone belongs to.
 /// @param index Zero-based zone index.

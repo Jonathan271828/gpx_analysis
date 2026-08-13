@@ -68,6 +68,15 @@ void zone_swatch(std::size_t index) {
     ImGui::Dummy(ImVec2(sw, ImGui::GetTextLineHeight()));
 }
 
+std::string zone_bounds_text(const zones::Zone& zone, const std::string& unit) {
+    char buf[64];
+    if (zone.hi < 0.0)
+        std::snprintf(buf, sizeof buf, "%.0f+ %s", zone.lo, unit.c_str());
+    else
+        std::snprintf(buf, sizeof buf, "%.0f-%.0f %s", zone.lo, zone.hi, unit.c_str());
+    return buf;
+}
+
 std::string zone_label(const zones::ZoneTable& table, int index) {
     if (index < 0 || static_cast<std::size_t>(index) >= table.zones.size()) return {};
     return table.zones[static_cast<std::size_t>(index)].label;
@@ -86,13 +95,9 @@ void draw_zone_legend(const zones::ZoneTable& table) {
 
         // The full name and bounds stay one hover away rather than crowding the
         // line, which has to hold seven entries.
-        if (ImGui::IsItemHovered()) {
-            char buf[96];
-            if (z.hi < 0.0) std::snprintf(buf, sizeof buf, "%s\n%.0f+ W", z.label.c_str(), z.lo);
-            else            std::snprintf(buf, sizeof buf, "%s\n%.0f-%.0f W",
-                                          z.label.c_str(), z.lo, z.hi);
-            ImGui::SetTooltip("%s", buf);
-        }
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("%s\n%s", z.label.c_str(),
+                              zone_bounds_text(z, "W").c_str());
     }
 }
 

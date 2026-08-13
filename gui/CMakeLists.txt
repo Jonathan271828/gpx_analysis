@@ -124,6 +124,11 @@ add_executable(gpxana_gui
     src/app_window.cpp
     src/analysis.cpp
     src/file_dialog.cpp
+    src/window.cpp
+    src/theme.cpp
+    src/paths.cpp
+    src/panel.cpp
+    src/bar_row.cpp
     src/palette.cpp
     src/zone_chart.cpp
     src/hill_chart.cpp
@@ -132,6 +137,15 @@ add_executable(gpxana_gui
 )
 target_link_libraries(gpxana_gui PRIVATE gpxana_core imgui_implot)
 target_compile_features(gpxana_gui PRIVATE cxx_std_17)
+
+# The GUI sources compile clean under these, so turn them on to keep it that
+# way: a truncating snprintf into an undersized buffer is exactly the kind of
+# thing that only shows up once the value gets large. Applied to this target
+# alone -- the analysis code and the vendored third-party sources are not this
+# directory's to police.
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(gpxana_gui PRIVATE -Wall -Wextra)
+endif()
 
 # Put the binary in the top of the build directory, next to gpx_reader, rather
 # than in the gui/ subdirectory this file lives in.

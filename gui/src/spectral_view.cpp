@@ -1,6 +1,7 @@
 #include "spectral_view.hpp"
 
 #include "palette.hpp"   // series_colour
+#include "theme.hpp"
 
 #include "imgui.h"
 #include "implot.h"
@@ -16,20 +17,12 @@ namespace gui {
 
 namespace {
 
-const ImVec4 kTextSecondary = ImVec4(0.765f, 0.761f, 0.718f, 1.00f);  // #c3c2b7
-const ImVec4 kSurface       = ImVec4(0.102f, 0.102f, 0.098f, 1.00f);  // #1a1a19
-const ImVec4 kGrid          = ImVec4(1.000f, 1.000f, 1.000f, 0.09f);  // recessive
+using theme::kTextSecondary;
 
 // Default lag window. The autocorrelation of a whole ride runs to thousands of
 // seconds, where it is only noise; the structure worth seeing (pedalling,
 // heart-rate drift, terrain repeats) sits inside the first few minutes.
 constexpr double kDefaultMaxLagS = 600.0;
-
-void push_plot_style() {
-    ImPlot::PushStyleColor(ImPlotCol_FrameBg,  kSurface);
-    ImPlot::PushStyleColor(ImPlotCol_PlotBg,   kSurface);
-    ImPlot::PushStyleColor(ImPlotCol_AxisGrid, kGrid);
-}
 
 // Number of leading entries of lag_s/acf that mean anything. The four output
 // vectors are padded to a common length with NaN, and feeding those to ImPlot
@@ -154,7 +147,7 @@ void draw_acf_plot(const std::vector<Spectrum>& spectra, bool full_lag,
 
     const double x_hi = full_lag ? max_lag : std::min(max_lag, kDefaultMaxLagS);
 
-    push_plot_style();
+    const theme::PlotStyleScope plot_style;
     // The id carries the lag range, so switching it re-fits instead of keeping
     // the other range's limits.
     if (ImPlot::BeginPlot(full_lag ? "##acf_full" : "##acf_short",
@@ -193,7 +186,6 @@ void draw_acf_plot(const std::vector<Spectrum>& spectra, bool full_lag,
         }
         ImPlot::EndPlot();
     }
-    ImPlot::PopStyleColor(3);
 }
 
 void draw_psd_plots(const std::vector<Spectrum>& spectra, bool refit,
@@ -235,7 +227,7 @@ void draw_psd_plots(const std::vector<Spectrum>& spectra, bool refit,
         if (!(y_hi > 0.0)) y_hi = 1.0;
         const ImPlotCond cond = refit ? ImPlotCond_Always : ImPlotCond_Once;
 
-        push_plot_style();
+        const theme::PlotStyleScope plot_style;
         if (ImPlot::BeginPlot(id.c_str(), ImVec2(width, height),
                               ImPlotFlags_NoTitle | ImPlotFlags_NoLegend |
                               ImPlotFlags_NoMouseText)) {
@@ -265,7 +257,6 @@ void draw_psd_plots(const std::vector<Spectrum>& spectra, bool refit,
             }
             ImPlot::EndPlot();
         }
-        ImPlot::PopStyleColor(3);
 
         ImGui::Dummy(ImVec2(0.0f, 6.0f));
     }

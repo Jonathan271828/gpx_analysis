@@ -42,6 +42,9 @@ private:
     /// @brief The report page: the captured text with charts spliced in.
     void draw_report();
 
+    /// @brief The track selector, shown only when the file holds several.
+    void draw_track_selector();
+
     /// @brief Time-in-zone chart panel. @param width Panel width in pixels.
     void draw_zone_panel(float width);
 
@@ -57,6 +60,12 @@ private:
     /// tabs so the selection can be changed from either.
     /// @return The page width available for the plots below.
     float draw_spectral_controls();
+
+    /// @brief One checkbox per channel the current track carries.
+    void draw_channel_picker();
+
+    /// @brief The resample interval, the Compute button and the export button.
+    void draw_transform_controls();
 
     /// @brief Path box and button that plot a `.acf.dat` file's columns as they
     /// stand, for comparing a stored spectrum against a recomputed one.

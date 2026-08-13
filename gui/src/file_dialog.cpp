@@ -1,5 +1,7 @@
 #include "file_dialog.hpp"
 
+#include "paths.hpp"
+
 #include <array>
 #include <cstdio>
 #include <cstdlib>
@@ -42,12 +44,6 @@ std::string first_line_of(const std::string& cmd) {
     return out;
 }
 
-// The directory part of a path, or empty when there is none.
-std::string dirname_of(const std::string& path) {
-    const std::string::size_type slash = path.find_last_of('/');
-    return (slash == std::string::npos) ? std::string{} : path.substr(0, slash);
-}
-
 } // namespace
 
 bool file_dialog_available() {
@@ -64,13 +60,13 @@ std::string open_gpx_file(std::string& start_dir) {
                       " --file-filter=" + shell_quote("GPX activities | *.gpx *.GPX") +
                       " --file-filter=" + shell_quote("All files | *");
     if (!start_dir.empty())
-        cmd += " --filename=" + shell_quote(start_dir + "/");
+        cmd += " --filename=" + shell_quote(start_dir);
     cmd += " 2>/dev/null";
 
     const std::string path = first_line_of(cmd);
     if (path.empty()) return {};   // cancelled
 
-    const std::string dir = dirname_of(path);
+    const std::string dir = paths::directory_of(path);
     if (!dir.empty()) start_dir = dir;
     return path;
 }

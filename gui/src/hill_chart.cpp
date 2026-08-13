@@ -1,6 +1,7 @@
 #include "hill_chart.hpp"
 
 #include "io_base.hpp"   // io::format_duration
+#include "theme.hpp"
 #include "palette.hpp"   // zone_colour
 
 #include "imgui.h"
@@ -17,13 +18,11 @@ namespace {
 // The profile outline. The area beneath it is coloured by power zone, so the
 // outline itself stays neutral rather than competing with Z1's blue.
 const ImVec4 kOutline  = ImVec4(1.000f, 1.000f, 1.000f, 0.60f);
-const ImVec4 kNoZone   = ImVec4(0.600f, 0.600f, 0.580f, 1.00f);  // power unknown
-const ImVec4 kCurve    = ImVec4(0.224f, 0.529f, 0.898f, 1.00f);  // hover marker
+using theme::kCurve;
+using theme::kNoZone;
 
-const ImVec4 kTextPrimary   = ImVec4(1.000f, 1.000f, 1.000f, 1.00f);  // #ffffff
-const ImVec4 kTextSecondary = ImVec4(0.765f, 0.761f, 0.718f, 1.00f);  // #c3c2b7
-const ImVec4 kSurface       = ImVec4(0.102f, 0.102f, 0.098f, 1.00f);  // #1a1a19
-const ImVec4 kGrid          = ImVec4(1.000f, 1.000f, 1.000f, 0.09f);  // recessive
+using theme::kTextPrimary;
+using theme::kTextSecondary;
 
 constexpr float kPlotHeight = 150.0f;
 
@@ -159,9 +158,7 @@ void draw_hill_chart(const HillProfile& hill, int index, HillAxis axis,
     char id[64];
     std::snprintf(id, sizeof id, "##hill%d_%s", index, use_time ? "t" : "d");
 
-    ImPlot::PushStyleColor(ImPlotCol_FrameBg,  kSurface);
-    ImPlot::PushStyleColor(ImPlotCol_PlotBg,   kSurface);
-    ImPlot::PushStyleColor(ImPlotCol_AxisGrid, kGrid);
+    const theme::PlotStyleScope plot_style;
 
     if (ImPlot::BeginPlot(id, ImVec2(width, kPlotHeight),
                           ImPlotFlags_NoTitle | ImPlotFlags_NoLegend |
@@ -223,7 +220,6 @@ void draw_hill_chart(const HillProfile& hill, int index, HillAxis axis,
         ImPlot::EndPlot();
     }
 
-    ImPlot::PopStyleColor(3);
 }
 
 } // namespace gui

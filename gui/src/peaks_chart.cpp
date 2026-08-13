@@ -1,7 +1,9 @@
 #include "peaks_chart.hpp"
 
+#include "bar_row.hpp"
 #include "io_base.hpp"   // io::format_duration
-#include "palette.hpp"   // zone_colour, zone_label
+#include "palette.hpp"
+#include "theme.hpp"   // zone_colour, zone_label
 
 #include "imgui.h"
 #include "implot.h"
@@ -17,27 +19,8 @@ namespace gui {
 
 namespace {
 
-// Ink and surface tokens. Values never wear a series colour.
-const ImVec4 kTextPrimary   = ImVec4(1.00f, 1.00f, 1.00f, 1.00f);   // #ffffff
-const ImVec4 kTextSecondary = ImVec4(0.765f, 0.761f, 0.718f, 1.0f); // #c3c2b7
-
-constexpr ImU32 kTrackColour = IM_COL32(255, 255, 255, 18);  // recessive bar track
-constexpr ImU32 kRowHover    = IM_COL32(255, 255, 255, 12);
-
-constexpr float kBarHeight  = 14.0f;   // thin marks
-constexpr float kBarRound   = 4.0f;    // 4px rounded data-end
-constexpr float kRowPad     = 7.0f;
-constexpr float kHeadingGap = 6.0f;
-
-float row_height() {
-    return std::max(ImGui::GetTextLineHeight(), kBarHeight) + kRowPad;
-}
-
-void text_coloured(const ImVec4& colour, const std::string& s) {
-    ImGui::PushStyleColor(ImGuiCol_Text, colour);
-    ImGui::TextUnformatted(s.c_str());
-    ImGui::PopStyleColor();
-}
+using theme::kTextPrimary;
+using theme::kTextSecondary;
 
 // "Z4 Threshold" -> "Z4"
 std::string short_tag(const std::string& label) {
@@ -49,34 +32,32 @@ std::string short_tag(const std::string& label) {
 
 // A single series, so it takes the first categorical slot: 4.79:1 on this
 // surface, clear of the 3:1 floor for marks.
-const ImVec4 kCurve   = ImVec4(0.224f, 0.529f, 0.898f, 1.00f);   // #3987e5
-const ImVec4 kSurface = ImVec4(0.102f, 0.102f, 0.098f, 1.00f);   // #1a1a19
-const ImVec4 kGrid    = ImVec4(1.000f, 1.000f, 1.000f, 0.09f);   // recessive
+using theme::kCurve;
 
 constexpr float kCurveHeight = 190.0f;
 
 // Compact duration for an axis tick: "5s", "1m", "20m", "1h".
+//
+// Built by concatenation rather than into a char buffer: the result is a
+// std::string either way, and a fixed buffer only invites the question of
+// whether it is large enough -- which for a 64-bit count of seconds it was not,
+// since a negative value needs twenty digits and the buffer held sixteen.
 std::string tick_label(Long s) {
-    char buf[16];
-    if (s < 60)         std::snprintf(buf, sizeof buf, "%lds", s);
-    else if (s < 3600)  std::snprintf(buf, sizeof buf, "%ldm", s / 60);
-    else                std::snprintf(buf, sizeof buf, "%ldh", s / 3600);
-    return buf;
+    if (s < 60)   return std::to_string(s) + "s";
+    if (s < 3600) return std::to_string(s / 60) + "m";
+    return std::to_string(s / 3600) + "h";
 }
 
 } // namespace
 
 float peaks_chart_height(const std::vector<PeakBar>& peaks) {
-    const std::size_t rows = peaks.empty() ? 1 : peaks.size();
-    return ImGui::GetTextLineHeight() + kHeadingGap +
-           ImGui::GetStyle().ItemSpacing.y * 2.0f +
-           row_height() * static_cast<float>(rows);
+    return bar::chart_height(peaks.empty() ? 1 : peaks.size());
 }
 
 void draw_peaks_chart(const std::vector<PeakBar>& peaks,
                       const zones::ZoneTable& zt) {
     if (peaks.empty()) {
-        text_coloured(kTextSecondary, "No peak efforts for this track.");
+        theme::text_coloured(kTextSecondary, "No peak efforts for this track.");
         return;
     }
 
@@ -85,11 +66,11 @@ void draw_peaks_chart(const std::vector<PeakBar>& peaks,
     ImGui::TextUnformatted("Peak power efforts");
     ImGui::PopStyleColor();
     ImGui::SameLine();
-    text_coloured(kTextSecondary,
+    theme::text_coloured(kTextSecondary,
                   peaks.front().measured
                       ? "  measured  -  best average power per duration"
                       : "  estimated  -  best average power per duration");
-    ImGui::Dummy(ImVec2(0.0f, kHeadingGap));
+    ImGui::Dummy(ImVec2(0.0f, bar::kHeadingGap));
 
     // --- Column geometry -----------------------------------------------------
     float dur_w = 0.0f;
@@ -113,7 +94,7 @@ void draw_peaks_chart(const std::vector<PeakBar>& peaks,
     if (peak <= 0.0) peak = 1.0;
 
     ImDrawList* draw  = ImGui::GetWindowDrawList();
-    const float row_h = row_height();
+    const float row_h = bar::row_height();
 
     // Rows are positioned by hand at exactly row_h apart, so the height that
     // peaks_chart_height() reports stays exact.
@@ -130,7 +111,7 @@ void draw_peaks_chart(const std::vector<PeakBar>& peaks,
 
         if (ImGui::IsWindowHovered() &&
             ImGui::IsMouseHoveringRect(row_min, row_max)) {
-            draw->AddRectFilled(row_min, row_max, kRowHover, 3.0f);
+            bar::highlight_row(draw, row_min, row_max);
             ImGui::SetTooltip("best %s effort\n%.0f W  (%.2f W/kg)%s%s\nstarting at %s",
                               io::format_duration(p.duration_s).c_str(),
                               p.avg_power_w, p.wkg,
@@ -144,22 +125,15 @@ void draw_peaks_chart(const std::vector<PeakBar>& peaks,
         ImGui::SetCursorScreenPos(
             ImVec2(row_min.x + dur_w - ImGui::CalcTextSize(dur.c_str()).x,
                    row_min.y + text_dy));
-        text_coloured(kTextPrimary, dur);
+        theme::text_coloured(kTextPrimary, dur);
 
         // The bar.
         const float  bar_x0 = row_min.x + dur_w + gap;
-        const float  bar_y0 = row_min.y + (row_h - kBarHeight) * 0.5f;
-        const ImVec2 track_a(bar_x0, bar_y0);
-        const ImVec2 track_b(bar_x0 + bar_area, bar_y0 + kBarHeight);
-        draw->AddRectFilled(track_a, track_b, kTrackColour, kBarRound);
-
-        const float len = static_cast<float>(p.avg_power_w / peak) * bar_area;
-        draw->AddRectFilled(track_a,
-                            ImVec2(bar_x0 + std::max(len, kBarRound * 2.0f),
-                                   bar_y0 + kBarHeight),
-                            p.zone >= 0 ? zone_colour(static_cast<std::size_t>(p.zone))
-                                        : IM_COL32(153, 153, 148, 255),
-                            kBarRound);
+        const float  bar_y0 = row_min.y + (row_h - bar::kBarHeight) * 0.5f;
+        bar::draw_bar(draw, ImVec2(bar_x0, bar_y0), bar_area,
+                      static_cast<float>(p.avg_power_w / peak),
+                      p.zone >= 0 ? zone_colour(static_cast<std::size_t>(p.zone))
+                                  : ImGui::GetColorU32(theme::kNoZone));
 
         // Direct labels: watts, per-kilo, the zone by name, and where it happened.
         float x = bar_x0 + bar_area + gap;
@@ -167,22 +141,22 @@ void draw_peaks_chart(const std::vector<PeakBar>& peaks,
 
         std::snprintf(buf, sizeof buf, "%4.0f W", p.avg_power_w);
         ImGui::SetCursorScreenPos(ImVec2(x, row_min.y + text_dy));
-        text_coloured(kTextPrimary, buf);
+        theme::text_coloured(kTextPrimary, buf);
         x += watt_w + gap;
 
         std::snprintf(buf, sizeof buf, "%.1f W/kg", p.wkg);
         ImGui::SetCursorScreenPos(ImVec2(x, row_min.y + text_dy));
-        text_coloured(kTextSecondary, p.wkg > 0.0 ? buf : "");
+        theme::text_coloured(kTextSecondary, p.wkg > 0.0 ? buf : "");
         x += wkg_w + gap;
 
         // The zone tag repeats what the bar's colour says, so the reading never
         // depends on colour alone.
         ImGui::SetCursorScreenPos(ImVec2(x, row_min.y + text_dy));
-        text_coloured(kTextPrimary, short_tag(zname));
+        theme::text_coloured(kTextPrimary, short_tag(zname));
         x += zone_w + gap;
 
         ImGui::SetCursorScreenPos(ImVec2(x, row_min.y + text_dy));
-        text_coloured(kTextSecondary,
+        theme::text_coloured(kTextSecondary,
                       "at " + io::format_duration(p.start_offset_s));
     }
 
@@ -226,9 +200,7 @@ void draw_hold_curve(const std::vector<PeakBar>& peaks, Real ftp_w,
     const double y_lo = std::min(0.0, *my.first - 5.0);
     const double y_hi = *my.second + 8.0;
 
-    ImPlot::PushStyleColor(ImPlotCol_FrameBg,  kSurface);
-    ImPlot::PushStyleColor(ImPlotCol_PlotBg,   kSurface);
-    ImPlot::PushStyleColor(ImPlotCol_AxisGrid, kGrid);
+    const theme::PlotStyleScope plot_style;
 
     // The id carries the reference, so switching it starts from limits that fit
     // the new y range rather than keeping the old one's.
@@ -288,7 +260,6 @@ void draw_hold_curve(const std::vector<PeakBar>& peaks, Real ftp_w,
         ImPlot::EndPlot();
     }
 
-    ImPlot::PopStyleColor(3);
 }
 
 } // namespace gui
