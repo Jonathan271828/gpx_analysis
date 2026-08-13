@@ -37,8 +37,8 @@ public:
     /// @brief Whether the user has asked to close the window.
     bool should_close() const;
 
-    /// @brief Call when a file is dropped on the window.
-    /// @param handler Receives the path; only the last of a multi-file drop.
+    /// @brief Call when files are dropped on the window.
+    /// @param handler Receives one call per dropped path, in the order given.
     void on_file_dropped(std::function<void(const std::string&)> handler);
 
     /// @brief Pump events and open a new ImGui frame.

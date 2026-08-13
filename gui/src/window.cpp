@@ -37,9 +37,9 @@ struct Window::Impl {
     // GLFW is a C API, so the drop callback finds its way back through the
     // window's user pointer rather than through a capture.
     static void forward_drop(GLFWwindow* w, int count, const char** paths) {
-        if (count <= 0) return;
         auto* impl = static_cast<Impl*>(glfwGetWindowUserPointer(w));
-        if (impl && impl->on_drop) impl->on_drop(paths[count - 1]);
+        if (!impl || !impl->on_drop) return;
+        for (int i = 0; i < count; ++i) impl->on_drop(paths[i]);
     }
 };
 

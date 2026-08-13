@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <string>
+#include <vector>
 
 namespace gui {
 
@@ -28,8 +29,8 @@ bool have_program(const char* name) {
     return std::system(cmd.c_str()) == 0;
 }
 
-// Run a command and return its first line of stdout, without the newline.
-std::string first_line_of(const std::string& cmd) {
+// Run a command and return everything it wrote to stdout.
+std::string output_of(const std::string& cmd) {
     FILE* pipe = ::popen(cmd.c_str(), "r");
     if (!pipe) return {};
 
@@ -38,11 +39,29 @@ std::string first_line_of(const std::string& cmd) {
     while (std::fgets(buf.data(), static_cast<int>(buf.size()), pipe))
         out += buf.data();
     ::pclose(pipe);
-
-    const std::string::size_type nl = out.find('\n');
-    if (nl != std::string::npos) out.erase(nl);
     return out;
 }
+
+// Split zenity's reply. With --multiple it separates paths with the character
+// given to --separator, and always ends with a newline.
+std::vector<std::string> split(const std::string& text, char separator) {
+    std::vector<std::string> parts;
+    std::string              current;
+    for (const char c : text) {
+        if (c == separator || c == '\n') {
+            if (!current.empty()) parts.push_back(current);
+            current.clear();
+        } else {
+            current += c;
+        }
+    }
+    if (!current.empty()) parts.push_back(current);
+    return parts;
+}
+
+// A path may legally contain any character but '/' and NUL, so the separator is
+// one that a chooser will not produce in a name.
+constexpr char kSeparator = '\n';
 
 } // namespace
 
@@ -51,24 +70,25 @@ bool file_dialog_available() {
     return available;
 }
 
-std::string open_gpx_file(std::string& start_dir) {
+std::vector<std::string> open_gpx_files(std::string& start_dir) {
     if (!file_dialog_available()) return {};
 
     // Trailing slash tells zenity to treat --filename as a folder, not a name.
-    std::string cmd = "zenity --file-selection --title=" +
-                      shell_quote("Open a GPX activity") +
+    std::string cmd = "zenity --file-selection --multiple --separator=" +
+                      shell_quote(std::string(1, kSeparator)) +
+                      " --title=" + shell_quote("Open GPX activities") +
                       " --file-filter=" + shell_quote("GPX activities | *.gpx *.GPX") +
                       " --file-filter=" + shell_quote("All files | *");
     if (!start_dir.empty())
         cmd += " --filename=" + shell_quote(start_dir);
     cmd += " 2>/dev/null";
 
-    const std::string path = first_line_of(cmd);
-    if (path.empty()) return {};   // cancelled
+    std::vector<std::string> paths = split(output_of(cmd), kSeparator);
+    if (paths.empty()) return {};   // cancelled
 
-    const std::string dir = paths::directory_of(path);
+    const std::string dir = paths::directory_of(paths.front());
     if (!dir.empty()) start_dir = dir;
-    return path;
+    return paths;
 }
 
 } // namespace gui

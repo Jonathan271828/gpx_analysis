@@ -122,6 +122,7 @@ target_compile_features(imgui_implot PUBLIC cxx_std_17)
 add_executable(gpxana_gui
     src/main.cpp
     src/app_window.cpp
+    src/file_view.cpp
     src/analysis.cpp
     src/file_dialog.cpp
     src/window.cpp

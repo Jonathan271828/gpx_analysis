@@ -21,8 +21,8 @@ int main(int argc, char* argv[]) {
     gui::AppWindow app;
     window.on_file_dropped([&app](const std::string& path) { app.load(path); });
 
-    // A path on the command line is loaded straight away.
-    if (argc > 1) app.load(argv[1]);
+    // Every path on the command line opens in a tab of its own.
+    for (int i = 1; i < argc; ++i) app.load(argv[i]);
 
     while (!window.should_close()) {
         if (!window.begin_frame()) continue;
