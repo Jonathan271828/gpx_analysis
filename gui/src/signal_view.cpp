@@ -49,19 +49,19 @@ Extent value_extent(const std::vector<Real>& v) {
 }
 
 /// The widest time span across every selected channel.
-TimeRange full_span(const std::vector<channels::Channel>& channels,
+Span full_span(const std::vector<channels::Channel>& channels,
                     const std::vector<char>& selected) {
-    TimeRange r;
+    Span r;
     bool any = false;
     for (std::size_t i = 0; i < channels.size(); ++i) {
         if (i >= selected.size() || !selected[i] || channels[i].t_s.empty()) continue;
         const double first = channels[i].t_s.front();
         const double last  = channels[i].t_s.back();
-        if (!any) { r.begin_s = first; r.end_s = last; any = true; continue; }
-        r.begin_s = std::min(r.begin_s, first);
-        r.end_s   = std::max(r.end_s, last);
+        if (!any) { r.lo = first; r.hi = last; any = true; continue; }
+        r.lo = std::min(r.lo, first);
+        r.hi   = std::max(r.hi, last);
     }
-    if (any && r.end_s <= r.begin_s) r.end_s = r.begin_s + 1.0;
+    if (any && r.hi <= r.lo) r.hi = r.lo + 1.0;
     return r;
 }
 
@@ -80,8 +80,8 @@ void draw_hover_readout(const channels::Channel& channel) {
 
 void draw_signal_plots(const std::vector<channels::Channel>& channels,
                        const std::vector<char>& selected,
-                       TimeRange& range, float width, float height) {
-    const TimeRange span = full_span(channels, selected);
+                       Span& range, float width, float height) {
+    const Span span = full_span(channels, selected);
     if (span.empty()) return;
     if (range.empty()) range = span;
 
@@ -106,12 +106,12 @@ void draw_signal_plots(const std::vector<channels::Channel>& channels,
 
             // Every plot reads and writes the same two doubles, so panning or
             // zooming one moves all of them, and the stack stays aligned.
-            ImPlot::SetupAxisLinks(ImAxis_X1, &range.begin_s, &range.end_s);
+            ImPlot::SetupAxisLinks(ImAxis_X1, &range.lo, &range.hi);
 
             // Pinned to the ride: without this the view pans off into empty
             // time either side, where every tick reads 0:00 and there is
             // nothing to see.
-            ImPlot::SetupAxisLimitsConstraints(ImAxis_X1, span.begin_s, span.end_s);
+            ImPlot::SetupAxisLimitsConstraints(ImAxis_X1, span.lo, span.hi);
             ImPlot::SetupAxisFormat(ImAxis_X1, format_time_tick);
             ImPlot::SetupAxisLimits(ImAxis_Y1, y.lo, y.hi, ImPlotCond_Always);
 

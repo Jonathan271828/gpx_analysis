@@ -6,7 +6,8 @@
 #include "analysis.hpp"
 #include "hill_chart.hpp"      // HillAxis
 #include "peaks_chart.hpp"     // HoldRef
-#include "signal_view.hpp"     // TimeRange
+#include "signal_view.hpp"     // draw_signal_plots
+#include "span.hpp"
 #include "spectral_view.hpp"   // Spectrum
 
 #include <string>
@@ -50,6 +51,18 @@ public:
     /// @brief The file name alone, for the tab label.
     std::string title() const;
 
+    /// @brief The channels of the track currently selected in this file's views.
+    ///
+    /// Which track that is belongs to the file, not to whoever is comparing:
+    /// a comparison shows what each ride is showing, so switching track in a
+    /// file tab changes what it contributes.
+    /// @return The channels, or an empty list when nothing is loaded.
+    const std::vector<channels::Channel>& channels() const;
+
+    /// @brief The distance axis of that same track.
+    /// @return The axis; empty() when the track carried no usable distance.
+    const DistanceAxis& distance() const;
+
 private:
     void draw_banner();
     void draw_report();
@@ -78,7 +91,7 @@ private:
     HoldRef     hold_ref_  = HoldRef::Peak;        ///< Reference for the hold curve.
 
     std::vector<char>     signal_on_;        ///< Which channels the signals tab plots.
-    TimeRange             signal_range_;     ///< Shared x span of the signal plots.
+    Span                  signal_range_;     ///< Shared x span of the signal plots.
     std::vector<char>     chan_on_;          ///< One flag per channel of @ref track_.
     std::vector<Spectrum> spectra_;          ///< Last computed transforms.
     float                 acf_dt_   = 0.0f;  ///< Resample interval (s); 0 = auto.

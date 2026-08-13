@@ -94,6 +94,19 @@ bool varies_by(const channels::Channel& c, Real minimum) {
     return (*hi - *lo) >= minimum;
 }
 
+/// The cumulative-distance axis, from the series the power analysis already
+/// accumulates -- the same one the --xy export writes as distance_km.
+DistanceAxis distance_axis(const PowerAnalysis& pa) {
+    DistanceAxis d;
+    const Size n = std::min(pa.t_offset_s.size(), pa.cum_dist_m.size());
+    for (Size i = 0; i < n; ++i) {
+        if (pa.t_offset_s[i] < 0) continue;
+        d.t_s.push_back(static_cast<Real>(pa.t_offset_s[i]));
+        d.km.push_back(pa.cum_dist_m[i] / 1000.0);
+    }
+    return d;
+}
+
 /// Append the channels the library does not build, when the track carries them.
 void add_point_channels(const Track& track, const PowerAnalysis& pa,
                         std::vector<channels::Channel>& out) {
@@ -336,6 +349,7 @@ void collect_chart_data(const arg_parser::Options& opts, Result& result) {
         tc.channels    = channels::extract(tracks[i], reader.compute_stats(i), pa);
 
         add_point_channels(tracks[i], pa, tc.channels);
+        tc.distance = distance_axis(pa);
 
         // Same durations the report uses. They live in a local constant inside
         // app.cpp, so the list is repeated here rather than shared; if the two

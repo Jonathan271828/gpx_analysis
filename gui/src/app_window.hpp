@@ -3,7 +3,9 @@
 /// @file app_window.hpp
 /// @brief The window: the toolbar, and a tab per loaded file.
 
+#include "compare_view.hpp"
 #include "file_view.hpp"
+#include "span.hpp"
 
 #include <string>
 #include <vector>
@@ -35,8 +37,12 @@ private:
     /// @brief The load button, the analysis settings, and Reload.
     void draw_toolbar();
 
-    /// @brief One tab per open file; the active one draws its views.
+    /// @brief One tab per open file, plus the comparison, which is pinned to
+    /// the end so it keeps its place as file tabs are reordered and closed.
     void draw_file_tabs();
+
+    /// @brief The comparison across every open file.
+    void draw_compare_tab();
 
     /// @brief Index of @p path among the open files, or -1.
     int index_of(const std::string& path) const;
@@ -58,6 +64,13 @@ private:
     /// it stays opt-in. Toggling it re-runs every open file, because the
     /// headwind term changes estimated power and everything derived from it.
     bool wind_on_ = false;
+
+    /// What the comparison lines the rides up by. Distance by default: the
+    /// question it usually answers is how two attempts at the same road differ,
+    /// and only distance makes the same climb fall at the same place.
+    CompareAxis       compare_axis_ = CompareAxis::Distance;
+    std::vector<char> compare_on_;     ///< Which channels the comparison plots.
+    Span              compare_range_;  ///< Shared x span of the comparison plots.
 };
 
 } // namespace gui

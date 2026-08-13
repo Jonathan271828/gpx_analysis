@@ -69,6 +69,21 @@ struct PeakBar {
     bool measured       = false;  ///< True when taken from a power meter.
 };
 
+/// @brief Cumulative distance at each timestamped point of a track.
+///
+/// An axis rather than a signal, which is why it sits beside the channels
+/// instead of among them: it is what a channel can be plotted *against* when
+/// comparing rides over the same route, where lining two climbs up by
+/// kilometre says something and lining them up by elapsed second does not.
+/// Both arrays are the same length and ascending in @ref t_s.
+struct DistanceAxis {
+    std::vector<Real> t_s;  ///< Seconds from the ride start.
+    std::vector<Real> km;   ///< Distance covered by then (km).
+
+    /// @brief True when the track carried no usable distance.
+    bool empty() const { return t_s.size() < 2; }
+};
+
 /// @brief Everything chartable about one track.
 struct TrackCharts {
     zones::ZoneTable         power_zones;   ///< Time-in-zone distribution.
@@ -79,6 +94,9 @@ struct TrackCharts {
     /// The per-sample series the track carries (velocity, power, heart rate,
     /// cadence), ready to hand to signal::compute_acf_psd().
     std::vector<channels::Channel> channels;
+
+    /// Distance covered, for plotting any of those channels against it.
+    DistanceAxis distance;
 };
 
 /// @brief The captured result of analysing one GPX file.

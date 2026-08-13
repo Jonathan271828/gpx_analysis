@@ -1,10 +1,15 @@
 #include "app_window.hpp"
 
+#include "compare_view.hpp"
 #include "file_dialog.hpp"
+#include "palette.hpp"
+#include "theme.hpp"
 
 #include "imgui.h"
 
+#include <algorithm>
 #include <cstddef>
+#include <vector>
 #include <string>
 
 namespace gui {
@@ -94,6 +99,14 @@ void AppWindow::draw_file_tabs() {
             }
             if (!open) closed = static_cast<int>(i);
         }
+
+        // Trailing so it stays at the right-hand end however the file tabs are
+        // reordered; only offered once there is more than one ride to compare.
+        if (files_.size() > 1 &&
+            ImGui::BeginTabItem("Compare", nullptr, ImGuiTabItemFlags_Trailing)) {
+            draw_compare_tab();
+            ImGui::EndTabItem();
+        }
         ImGui::EndTabBar();
     }
 
@@ -103,6 +116,62 @@ void AppWindow::draw_file_tabs() {
         files_.erase(files_.begin() + closed);
         if (active_ > closed) --active_;
     }
+}
+
+void AppWindow::draw_compare_tab() {
+    std::vector<CompareRide> rides;
+    rides.reserve(files_.size());
+    for (const FileView& f : files_)
+        rides.push_back({f.title(), &f.channels(), &f.distance()});
+
+    const std::vector<std::string> names = compare_channels(rides);
+    if (names.empty()) {
+        ImGui::TextDisabled("The open files carry no channels to compare.");
+        return;
+    }
+    if (compare_on_.size() != names.size()) compare_on_.assign(names.size(), 1);
+
+    const ImGuiStyle& style  = ImGui::GetStyle();
+    const float       page_w = ImGui::GetContentRegionAvail().x - style.ScrollbarSize;
+
+    ImGui::TextUnformatted("Line up by:");
+    ImGui::SameLine();
+    int  axis         = static_cast<int>(compare_axis_);
+    bool axis_changed = ImGui::RadioButton("distance", &axis,
+                                           static_cast<int>(CompareAxis::Distance));
+    ImGui::SameLine();
+    axis_changed |= ImGui::RadioButton("elapsed time", &axis,
+                                       static_cast<int>(CompareAxis::Elapsed));
+    if (axis_changed) {
+        compare_axis_  = static_cast<CompareAxis>(axis);
+        compare_range_ = Span{};   // the numbers mean something else now
+    }
+
+    ImGui::SameLine();
+    if (ImGui::Button("Reset zoom")) compare_range_ = Span{};
+
+    ImGui::TextUnformatted("Channels:");
+    for (std::size_t i = 0; i < names.size(); ++i) {
+        ImGui::SameLine();
+        bool on = compare_on_[i] != 0;
+        if (ImGui::Checkbox((names[i] + "##cmp").c_str(), &on))
+            compare_on_[i] = on ? 1 : 0;
+    }
+
+    // Colour means the ride here, not the channel, so the key has to be present
+    // rather than inferred from the plot legends one at a time.
+    ImGui::TextUnformatted("Rides:");
+    for (std::size_t i = 0; i < files_.size(); ++i) {
+        ImGui::SameLine();
+        theme::text_coloured(series_colour(i), files_[i].title());
+    }
+
+    ImGui::Separator();
+
+    ImGui::BeginChild("compare", ImVec2(0.0f, 0.0f));
+    draw_compare_plots(rides, names, compare_on_, compare_axis_, compare_range_,
+                       page_w - 12.0f, 190.0f);
+    ImGui::EndChild();
 }
 
 void AppWindow::draw_toolbar() {

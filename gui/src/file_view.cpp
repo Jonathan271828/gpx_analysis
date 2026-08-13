@@ -98,6 +98,21 @@ std::string FileView::title() const {
     return paths::basename_of(path_);
 }
 
+namespace {
+const std::vector<channels::Channel> kNoChannels;
+const DistanceAxis                   kNoDistance;
+} // namespace
+
+const std::vector<channels::Channel>& FileView::channels() const {
+    if (result_.tracks.empty()) return kNoChannels;
+    return result_.tracks[static_cast<Size>(track_)].channels;
+}
+
+const DistanceAxis& FileView::distance() const {
+    if (result_.tracks.empty()) return kNoDistance;
+    return result_.tracks[static_cast<Size>(track_)].distance;
+}
+
 // The four views onto this ride. They are tabs rather than one page because
 // they answer different questions: what happened (report, signals), and what
 // repeats (autocorrelation, spectrum).
@@ -127,7 +142,7 @@ void FileView::draw() {
 
 void FileView::reset_channel_selection() {
     signal_on_.clear();
-    signal_range_ = TimeRange{};
+    signal_range_ = Span{};
     chan_on_.clear();
     spectra_.clear();
     psd_refit_ = true;
@@ -325,7 +340,7 @@ void FileView::draw_signals_tab() {
     }
 
     ImGui::SameLine();
-    if (ImGui::Button("Reset zoom")) signal_range_ = TimeRange{};
+    if (ImGui::Button("Reset zoom")) signal_range_ = Span{};
     if (ImGui::IsItemHovered())
         ImGui::SetTooltip("Back to the whole ride. The plots share one time\n"
                           "axis, so zooming or panning any of them moves all.");
