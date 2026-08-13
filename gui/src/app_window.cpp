@@ -3,6 +3,7 @@
 #include "file_dialog.hpp"
 #include "panel.hpp"
 #include "paths.hpp"
+#include "signal_view.hpp"
 #include "file_output.hpp"   // io::write_spectral_file
 #include "palette.hpp"
 #include "peaks_chart.hpp"
@@ -115,6 +116,10 @@ void AppWindow::draw() {
                 draw_report();
                 ImGui::EndTabItem();
             }
+            if (ImGui::BeginTabItem("Signals")) {
+                draw_signals_tab();
+                ImGui::EndTabItem();
+            }
             if (ImGui::BeginTabItem("Autocorrelation")) {
                 draw_acf_tab();
                 ImGui::EndTabItem();
@@ -130,6 +135,8 @@ void AppWindow::draw() {
 }
 
 void AppWindow::reset_channel_selection() {
+    signal_on_.clear();
+    signal_range_ = TimeRange{};
     chan_on_.clear();
     spectra_.clear();
     psd_refit_ = true;
@@ -140,6 +147,10 @@ void AppWindow::reset_channel_selection() {
         result_.tracks[static_cast<Size>(track_)].channels;
     // Velocity is on by default: every ride with power has it, and it is the
     // channel whose periodicity is usually asked about first.
+    // Every channel is plotted by default: the signals tab is a look at the
+    // whole ride, and hiding traces behind a picker defeats that.
+    signal_on_.assign(ch.size(), 1);
+
     chan_on_.assign(ch.size(), 0);
     for (Size i = 0; i < ch.size(); ++i)
         if (ch[i].name == "velocity") chan_on_[i] = 1;
@@ -294,6 +305,45 @@ void AppWindow::draw_transform_controls() {
     ImGui::SameLine();
     ImGui::TextDisabled("(%zu computed at dt = %.3g s)", spectra_.size(),
                         spectra_.front().result.dt_s);
+}
+
+void AppWindow::draw_signals_tab() {
+    if (path_.empty()) {
+        ImGui::TextDisabled("Load a GPX activity to plot its signals.");
+        return;
+    }
+    if (result_.tracks.empty() ||
+        result_.tracks[static_cast<Size>(track_)].channels.empty()) {
+        ImGui::TextDisabled("This track carries no channels to plot.");
+        return;
+    }
+
+    const std::vector<channels::Channel>& ch =
+        result_.tracks[static_cast<Size>(track_)].channels;
+    if (signal_on_.size() != ch.size()) signal_on_.assign(ch.size(), 1);
+
+    const ImGuiStyle& style  = ImGui::GetStyle();
+    const float       page_w = ImGui::GetContentRegionAvail().x - style.ScrollbarSize;
+
+    ImGui::TextUnformatted("Channels:");
+    for (Size i = 0; i < ch.size(); ++i) {
+        ImGui::SameLine();
+        bool on = signal_on_[i] != 0;
+        if (ImGui::Checkbox((ch[i].name + "##sig").c_str(), &on))
+            signal_on_[i] = on ? 1 : 0;
+    }
+
+    ImGui::SameLine();
+    if (ImGui::Button("Reset zoom")) signal_range_ = TimeRange{};
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Back to the whole ride. The plots share one time\n"
+                          "axis, so zooming or panning any of them moves all.");
+
+    ImGui::Separator();
+
+    ImGui::BeginChild("signals", ImVec2(0.0f, 0.0f));
+    draw_signal_plots(ch, signal_on_, signal_range_, page_w - 12.0f, 170.0f);
+    ImGui::EndChild();
 }
 
 void AppWindow::draw_acf_tab() {

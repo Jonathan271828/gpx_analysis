@@ -125,6 +125,8 @@ add_executable(gpxana_gui
     src/analysis.cpp
     src/file_dialog.cpp
     src/window.cpp
+    src/format.cpp
+    src/signal_view.cpp
     src/theme.cpp
     src/paths.cpp
     src/panel.cpp

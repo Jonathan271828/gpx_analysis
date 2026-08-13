@@ -1,6 +1,7 @@
 #include "peaks_chart.hpp"
 
 #include "bar_row.hpp"
+#include "format.hpp"
 #include "io_base.hpp"   // io::format_duration
 #include "palette.hpp"
 #include "theme.hpp"   // zone_colour, zone_label
@@ -35,18 +36,6 @@ std::string short_tag(const std::string& label) {
 using theme::kCurve;
 
 constexpr float kCurveHeight = 190.0f;
-
-// Compact duration for an axis tick: "5s", "1m", "20m", "1h".
-//
-// Built by concatenation rather than into a char buffer: the result is a
-// std::string either way, and a fixed buffer only invites the question of
-// whether it is large enough -- which for a 64-bit count of seconds it was not,
-// since a negative value needs twenty digits and the buffer held sixteen.
-std::string tick_label(Long s) {
-    if (s < 60)   return std::to_string(s) + "s";
-    if (s < 3600) return std::to_string(s / 60) + "m";
-    return std::to_string(s / 3600) + "h";
-}
 
 } // namespace
 
@@ -189,7 +178,7 @@ void draw_hold_curve(const std::vector<PeakBar>& peaks, Real ftp_w,
         xs.push_back(static_cast<double>(p.duration_s));
         ys.push_back(p.avg_power_w / basis * 100.0);
         ticks.push_back(static_cast<double>(p.duration_s));
-        labels.push_back(tick_label(p.duration_s));
+        labels.push_back(fmt::compact_duration(p.duration_s));
     }
 
     std::vector<const char*> label_ptrs;

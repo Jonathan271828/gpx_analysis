@@ -20,6 +20,15 @@ void text_coloured(const ImVec4& colour, const std::string& s) {
     ImGui::PopStyleColor();
 }
 
+void value_tooltip(const char* primary, const char* secondary) {
+    if (!ImGui::BeginTooltip()) return;
+    ImGui::TextUnformatted(primary);
+    ImGui::PushStyleColor(ImGuiCol_Text, kTextSecondary);
+    ImGui::TextUnformatted(secondary);
+    ImGui::PopStyleColor();
+    ImGui::EndTooltip();
+}
+
 namespace {
 // One entry per PushStyleColor in the constructor.
 constexpr int kPlotStyleColours = 3;

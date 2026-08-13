@@ -49,6 +49,69 @@ private:
     std::streambuf*    old_err_;
 };
 
+// Elevation as a channel, alongside the ones channels::extract() builds.
+// Elevation and temperature as channels, alongside the ones
+// channels::extract() builds.
+//
+// They live here rather than in the library because the analysis has no use for
+// either -- the hills table works from the raw points and the temperature only
+// reaches the statistics block -- while a plot of the ride wants both on the
+// same time axis as everything else. Same shape as the library's channels, so
+// they plot and transform like any other.
+
+/// Build a channel from a per-point field.
+///
+/// @param track     The track to read.
+/// @param pa        Supplies the per-point elapsed times.
+/// @param name      Channel name.
+/// @param unit      Channel unit.
+/// @param present   Whether a given point carries the field.
+/// @param value     The field's value at a given point.
+template <typename Present, typename Value>
+channels::Channel point_channel(const Track& track, const PowerAnalysis& pa,
+                                const char* name, const char* unit,
+                                Present present, Value value) {
+    channels::Channel c{name, unit, {}, {}};
+
+    for (Size i = 0; i < track.points.size(); ++i) {
+        const Long t = (i < pa.t_offset_s.size()) ? pa.t_offset_s[i] : -1;
+        if (t < 0 || !present(track.points[i])) continue;
+        c.t_s.push_back(static_cast<Real>(t));
+        c.value.push_back(value(track.points[i]));
+    }
+    return c;
+}
+
+/// Whether a series varies enough to be worth an axis of its own.
+///
+/// TrackPoint has no has_ele flag -- the parser leaves elevation at 0.0 when the
+/// file carries no <ele> -- so a track without elevation is indistinguishable
+/// from one recorded at sea level, and would plot as a flat line. Requiring some
+/// variation stands in for the missing flag.
+bool varies_by(const channels::Channel& c, Real minimum) {
+    if (c.value.size() < 2) return false;
+    const auto [lo, hi] = std::minmax_element(c.value.begin(), c.value.end());
+    return (*hi - *lo) >= minimum;
+}
+
+/// Append the channels the library does not build, when the track carries them.
+void add_point_channels(const Track& track, const PowerAnalysis& pa,
+                        std::vector<channels::Channel>& out) {
+    channels::Channel ele = point_channel(
+        track, pa, "elevation", "m",
+        [](const TrackPoint&) { return true; },
+        [](const TrackPoint& p) { return p.ele; });
+    if (varies_by(ele, 1.0)) out.push_back(std::move(ele));
+
+    // "C" rather than "\u00b0C": ImGui's default font is ASCII only, so the
+    // degree sign would render as a placeholder box.
+    channels::Channel temp = point_channel(
+        track, pa, "temperature", "C",
+        [](const TrackPoint& p) { return p.has_atemp; },
+        [](const TrackPoint& p) { return p.atemp; });
+    if (temp.t_s.size() >= 2) out.push_back(std::move(temp));
+}
+
 // Which power zone `watts` falls in, or -1 when the zone table is unusable.
 int zone_of(Real watts, const zones::ZoneTable& table) {
     if (!table.valid) return -1;
@@ -271,6 +334,8 @@ void collect_chart_data(const arg_parser::Options& opts, Result& result) {
         tc.power_zones = zones::power_zones(tracks[i], pa, opts.ftp_w);
         tc.ftp_w       = opts.ftp_w;
         tc.channels    = channels::extract(tracks[i], reader.compute_stats(i), pa);
+
+        add_point_channels(tracks[i], pa, tc.channels);
 
         // Same durations the report uses. They live in a local constant inside
         // app.cpp, so the list is repeated here rather than shared; if the two

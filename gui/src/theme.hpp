@@ -33,6 +33,15 @@ extern const ImVec4 kError;          ///< Failures.
 /// @param s      The text; drawn verbatim, so `%` needs no escaping.
 void text_coloured(const ImVec4& colour, const std::string& s);
 
+/// @brief A two-line readout: a value, then a supporting line beneath it.
+///
+/// Used where a plot reports what is under the cursor. The plots set
+/// ImPlotFlags_NoMouseText, so this replaces ImPlot's unlabelled corner text
+/// with something that can name the axes and carry units.
+/// @param primary   The line the eye should land on.
+/// @param secondary The supporting line, drawn recessive.
+void value_tooltip(const char* primary, const char* secondary);
+
 /// @brief Applies the shared plot background and grid for its lifetime.
 ///
 /// ImPlot's colour stack must be popped exactly as often as it is pushed, and

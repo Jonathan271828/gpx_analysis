@@ -6,6 +6,7 @@
 #include "analysis.hpp"
 #include "hill_chart.hpp"      // HillAxis
 #include "peaks_chart.hpp"     // HoldRef
+#include "signal_view.hpp"     // TimeRange
 #include "spectral_view.hpp"   // Spectrum
 
 #include <string>
@@ -71,6 +72,9 @@ private:
     /// stand, for comparing a stored spectrum against a recomputed one.
     void draw_dat_loader();
 
+    /// @brief The signals tab: every channel plotted against elapsed time.
+    void draw_signals_tab();
+
     /// @brief The autocorrelation tab.
     void draw_acf_tab();
 
@@ -107,6 +111,8 @@ private:
     /// term changes estimated power and everything derived from it.
     bool wind_on_ = false;
 
+    std::vector<char>     signal_on_;        ///< Which channels the signals tab plots.
+    TimeRange             signal_range_;     ///< Shared x span of the signal plots.
     std::vector<char>     chan_on_;          ///< One flag per channel of @ref track_.
     std::vector<Spectrum> spectra_;          ///< Last computed transforms.
     float                 acf_dt_   = 0.0f;  ///< Resample interval (s); 0 = auto.
