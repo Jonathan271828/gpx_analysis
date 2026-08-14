@@ -616,10 +616,10 @@ airspeed; all are referred to the pedals through the drivetrain efficiency
 $\eta$:
 
 $$
-P = \frac{v}{\eta}\Bigl( \underbrace{mg\sin(\theta)}_{\text{gravity}}
-+ \underbrace{mg C_{\mathrm{rr}}\cos(\theta)}_{\text{rolling}}
-+ \underbrace{ma}_{\text{inertia}}
-+ \underbrace{\tfrac{1}{2}\rho C_{\mathrm d}A\frac{(v + v_{\mathrm{hw}})^{2}}{v}}_{\text{aerodynamic}} \Bigr)
+P = \frac{v}{\eta}\Bigl( \underbrace{mg\sin(\theta)}_{\text{gravity}} +
+\underbrace{mg C_{\mathrm{rr}}\cos(\theta)}_{\text{rolling}} +
+\underbrace{ma}_{\text{inertia}} +
+\underbrace{\tfrac{1}{2}\rho C_{\mathrm d}A\frac{(v + v_{\mathrm{hw}})^{2}}{v}}_{\text{aerodynamic}} \Bigr)
 $$
 
 with $\theta = \arctan(\mathrm{grade})$ and $v_{\mathrm{hw}}$ the headwind
